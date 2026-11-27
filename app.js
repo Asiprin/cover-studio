@@ -81,9 +81,9 @@ const defaults = {
   markerStyle: "marker",
   titleScale: "100",
   titleY: "14",
-  markerHeight: "82",
+  markerHeight: "70",
   brushX: "0",
-  brushY: "0",
+  brushY: "25",
   mediaHeight: "58",
   mediaY: "35",
   brightness: "100",
@@ -103,7 +103,10 @@ const defaults = {
   personContrast: "5",
   personSaturation: "4",
   personTemperature: "2",
-  personSharpen: "18"
+  personSharpen: "18",
+  faceSlim: "0",
+  lipstickAmount: "0",
+  lipstickColor: "#b2384e"
 };
 
 const formIds = Object.keys(defaults);
@@ -114,7 +117,10 @@ const PERSON_FILTER_IDS = new Set([
   "personContrast",
   "personSaturation",
   "personTemperature",
-  "personSharpen"
+  "personSharpen",
+  "faceSlim",
+  "lipstickAmount",
+  "lipstickColor"
 ]);
 const BACKGROUND_FILTER_IDS = new Set([
   "brightness",
@@ -169,7 +175,10 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 8,
     personSaturation: 16,
     personTemperature: 28,
-    personSharpen: 24
+    personSharpen: 24,
+    faceSlim: 4,
+    lipstickAmount: 30,
+    lipstickColor: "#c84b55"
   },
   vintage: {
     skinSmooth: 18,
@@ -178,7 +187,10 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 22,
     personSaturation: -22,
     personTemperature: 18,
-    personSharpen: 48
+    personSharpen: 48,
+    faceSlim: 2,
+    lipstickAmount: 22,
+    lipstickColor: "#9e3840"
   },
   punch: {
     skinSmooth: 8,
@@ -187,7 +199,10 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 38,
     personSaturation: 28,
     personTemperature: -5,
-    personSharpen: 72
+    personSharpen: 72,
+    faceSlim: 8,
+    lipstickAmount: 35,
+    lipstickColor: "#d34254"
   },
   soft: {
     skinSmooth: 92,
@@ -196,7 +211,10 @@ const PERSON_FILTER_PRESETS = {
     personContrast: -12,
     personSaturation: -8,
     personTemperature: 10,
-    personSharpen: 0
+    personSharpen: 0,
+    faceSlim: 5,
+    lipstickAmount: 12,
+    lipstickColor: "#d77a83"
   },
   none: {
     skinSmooth: 0,
@@ -276,6 +294,12 @@ let modelLoadPromise;
 let segmentationBusy = false;
 let templatePage = 0;
 const templatePageSize = 2;
+let historyStack = [];
+let historyIndex = -1;
+let historyTimer = null;
+let restoringHistory = false;
+const assetIds = new WeakMap();
+let nextAssetId = 1;
 
 const RMBG_MODEL_URL = "./models/model_quantized.onnx";
 const ORT_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js";
@@ -293,7 +317,8 @@ const TEMPLATE_STYLES = {
     markerColor: "#ffc94d",
     markerTextColor: "#101110",
     markerStyle: "marker",
-    markerHeight: "82",
+    markerHeight: "70",
+    brushY: "25",
     titleScale: "100",
     titleY: "14",
     mediaY: "35",
@@ -450,10 +475,12 @@ function init() {
   bindRightTabs();
   bindCanvasTools();
   bindPhotoGestures();
+  bindHistoryControls();
   loadSettings();
   applyLayoutLock();
   syncAllOutputs();
   render();
+  scheduleHistoryCommit(0);
 }
 
 async function loadLucideIcons() {
@@ -542,6 +569,7 @@ async function handleSceneFile(file) {
   state.sceneImage = image;
   $("#sceneFileName").textContent = file.name;
   queueRender();
+  scheduleHistoryCommit(80);
   showToast("场景图片已载入");
 }
 
@@ -558,6 +586,7 @@ async function handlePersonFile(file) {
     const image = await loadImageFromFile(file);
     state.personImage = image;
     await recutPerson();
+    scheduleHistoryCommit(120);
     showToast("人物抠图完成");
   } catch (error) {
     console.error(error);
@@ -1023,7 +1052,12 @@ function applyPersonFilterPreset(presetName) {
     return;
   }
 
-  const preset = PERSON_FILTER_PRESETS[presetName] || PERSON_FILTER_PRESETS.clean;
+  const preset = {
+    faceSlim: 0,
+    lipstickAmount: 0,
+    lipstickColor: "#b2384e",
+    ...(PERSON_FILTER_PRESETS[presetName] || PERSON_FILTER_PRESETS.clean)
+  };
   $("#personFilterPreset").value = presetName;
   Object.entries(preset).forEach(([id, value]) => {
     document.getElementById(id).value = String(value);
@@ -1220,10 +1254,123 @@ function bindCanvasTools() {
   $("#exportAllButton").addEventListener("click", exportAll);
 }
 
+function bindHistoryControls() {
+  $("#undoButton").addEventListener("click", undoHistory);
+  $("#redoButton").addEventListener("click", redoHistory);
+}
+
+function scheduleHistoryCommit(delay = 120) {
+  if (restoringHistory) return;
+  clearTimeout(historyTimer);
+  historyTimer = setTimeout(commitHistory, delay);
+}
+
+function getAssetId(asset) {
+  if (!asset) return 0;
+  if (!assetIds.has(asset)) assetIds.set(asset, nextAssetId++);
+  return assetIds.get(asset);
+}
+
+function createHistorySnapshot() {
+  const controls = {};
+  formIds.forEach((id) => {
+    controls[id] = document.getElementById(id).value;
+  });
+  return {
+    controls,
+    activeRatio: state.activeRatio,
+    template: state.template,
+    layoutLocked: state.layoutLocked,
+    zoom: state.zoom,
+    sceneImage: state.sceneImage,
+    personImage: state.personImage,
+    personCutout: state.personCutout,
+    personFiltered: state.personFiltered,
+    personBounds: state.personBounds,
+    cutoutMode: state.cutoutMode
+  };
+}
+
+function snapshotSignature(snapshot) {
+  return JSON.stringify({
+    controls: snapshot.controls,
+    activeRatio: snapshot.activeRatio,
+    template: snapshot.template,
+    layoutLocked: snapshot.layoutLocked,
+    zoom: snapshot.zoom,
+    sceneImage: getAssetId(snapshot.sceneImage),
+    personImage: getAssetId(snapshot.personImage),
+    personCutout: getAssetId(snapshot.personCutout),
+    personFiltered: getAssetId(snapshot.personFiltered)
+  });
+}
+
+function commitHistory() {
+  if (restoringHistory) return;
+  const snapshot = createHistorySnapshot();
+  const signature = snapshotSignature(snapshot);
+  if (historyIndex >= 0 && snapshotSignature(historyStack[historyIndex]) === signature) {
+    updateHistoryButtons();
+    return;
+  }
+  historyStack = historyStack.slice(0, historyIndex + 1);
+  historyStack.push(snapshot);
+  if (historyStack.length > 50) historyStack.shift();
+  historyIndex = historyStack.length - 1;
+  updateHistoryButtons();
+}
+
+function restoreHistorySnapshot(snapshot) {
+  if (!snapshot) return;
+  restoringHistory = true;
+  state.template = snapshot.template;
+  state.layoutLocked = snapshot.layoutLocked;
+  state.sceneImage = snapshot.sceneImage;
+  state.personImage = snapshot.personImage;
+  state.personCutout = snapshot.personCutout;
+  state.personFiltered = snapshot.personFiltered;
+  state.personBounds = snapshot.personBounds;
+  state.cutoutMode = snapshot.cutoutMode;
+  Object.entries(snapshot.controls).forEach(([id, value]) => {
+    const input = document.getElementById(id);
+    if (input) input.value = value;
+  });
+  selectRatio(snapshot.activeRatio);
+  setZoom(snapshot.zoom);
+  $$(".template-card").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.template === snapshot.template);
+  });
+  showTemplatePageForSelection();
+  applyLayoutLock();
+  syncAllOutputs();
+  if (state.personCutout) schedulePersonFilter(0);
+  queueRender();
+  restoringHistory = false;
+  updateHistoryButtons();
+}
+
+function undoHistory() {
+  if (historyIndex <= 0) return;
+  historyIndex -= 1;
+  restoreHistorySnapshot(historyStack[historyIndex]);
+}
+
+function redoHistory() {
+  if (historyIndex >= historyStack.length - 1) return;
+  historyIndex += 1;
+  restoreHistorySnapshot(historyStack[historyIndex]);
+}
+
+function updateHistoryButtons() {
+  $("#undoButton").disabled = historyIndex <= 0;
+  $("#redoButton").disabled = historyIndex < 0 || historyIndex >= historyStack.length - 1;
+}
+
 function setZoom(value) {
   state.zoom = Math.max(0.7, Math.min(1.35, Number(value.toFixed(2))));
   $("#canvasShell").style.transform = `scale(${state.zoom})`;
   $("#zoomLabel").textContent = state.zoom === 1 ? "适应" : `${Math.round(state.zoom * 100)}%`;
+  scheduleHistoryCommit(180);
 }
 
 function selectRatio(id) {
@@ -1478,7 +1625,7 @@ function drawTitle(ctx, ratio) {
   const fontWeight = $("#fontWeight").value;
   const titleScale = Number($("#titleScale").value) / 100;
   const titleYRatio = Number($("#titleY").value) / 100;
-  const titleY = height * titleYRatio;
+  let titleY = height * titleYRatio;
   const maxWidth = width * layout.titleWidth;
   const baseSize = Math.min(width * 0.125, height * 0.12) * titleScale;
 
@@ -1486,9 +1633,21 @@ function drawTitle(ctx, ratio) {
   const centered = layout.titleAlign === "center";
   ctx.textAlign = centered ? "center" : "left";
   ctx.textBaseline = "top";
-  const firstSize = fitFont(ctx, line1, fontFamily, fontWeight, baseSize, maxWidth);
-  const secondSize = line2 ? fitFont(ctx, line2, fontFamily, fontWeight, baseSize, maxWidth) : firstSize;
-  const gap = Math.max(firstSize * 0.2, width * 0.018);
+  let firstSize = fitFont(ctx, line1, fontFamily, fontWeight, baseSize, maxWidth);
+  let secondSize = line2 ? fitFont(ctx, line2, fontFamily, fontWeight, baseSize, maxWidth) : firstSize;
+  let gap = Math.max(firstSize * 0.16, width * 0.014);
+  const mediaTop = getMediaRect(ratio).y;
+  const mediaGap = Math.max(height * 0.018, 18);
+  const availableHeight = Math.max(firstSize * 0.75, mediaTop - titleY - mediaGap);
+  const naturalHeight = firstSize + gap + (line2 ? secondSize : 0);
+  if (naturalHeight > availableHeight) {
+    const fitScale = Math.max(0.52, availableHeight / naturalHeight);
+    firstSize *= fitScale;
+    secondSize *= fitScale;
+    gap *= fitScale;
+  }
+  const totalHeight = firstSize + gap + (line2 ? secondSize : 0);
+  titleY = Math.max(height * 0.035, Math.min(titleY, mediaTop - totalHeight - mediaGap));
   const firstX = centered ? width / 2 : width * (1 - layout.titleWidth) / 2;
   const secondX = centered ? width / 2 : firstX;
 
@@ -1885,9 +2044,13 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
     contrast: Number($("#personContrast").value),
     saturation: Number($("#personSaturation").value),
     temperature: Number($("#personTemperature").value),
-    sharpen: Number($("#personSharpen").value)
+    sharpen: Number($("#personSharpen").value),
+    faceSlim: Number($("#faceSlim").value),
+    lipstickAmount: Number($("#lipstickAmount").value),
+    lipstickColor: $("#lipstickColor").value
   };
-  const unchanged = Object.values(settings).every((value) => value === 0);
+  const unchanged = ["smooth", "white", "brightness", "contrast", "saturation", "temperature", "sharpen", "faceSlim", "lipstickAmount"]
+    .every((key) => settings[key] === 0);
   if (unchanged) return sourceCanvas;
 
   const width = sourceCanvas.width;
@@ -1951,27 +2114,124 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
   const adjustedContext = adjustedCanvas.getContext("2d", { willReadFrequently: true });
   adjustedContext.putImageData(adjustedPixels, 0, 0);
 
-  if (settings.sharpen <= 0) return adjustedCanvas;
+  if (settings.sharpen > 0) {
+    const sharpenCanvas = document.createElement("canvas");
+    sharpenCanvas.width = width;
+    sharpenCanvas.height = height;
+    const sharpenContext = sharpenCanvas.getContext("2d", { willReadFrequently: true });
+    sharpenContext.filter = `blur(${0.55 + settings.sharpen * 0.008}px)`;
+    sharpenContext.drawImage(adjustedCanvas, 0, 0);
+    sharpenContext.filter = "none";
+    const sharpenBlur = sharpenContext.getImageData(0, 0, width, height);
+    const sharpened = adjustedContext.getImageData(0, 0, width, height);
+    const strength = settings.sharpen / 100 * 0.92;
 
-  const sharpenCanvas = document.createElement("canvas");
-  sharpenCanvas.width = width;
-  sharpenCanvas.height = height;
-  const sharpenContext = sharpenCanvas.getContext("2d", { willReadFrequently: true });
-  sharpenContext.filter = `blur(${0.55 + settings.sharpen * 0.008}px)`;
-  sharpenContext.drawImage(adjustedCanvas, 0, 0);
-  sharpenContext.filter = "none";
-  const sharpenBlur = sharpenContext.getImageData(0, 0, width, height);
-  const sharpened = adjustedContext.getImageData(0, 0, width, height);
-  const strength = settings.sharpen / 100 * 0.92;
-
-  for (let index = 0; index < sharpened.data.length; index += 4) {
-    if (sharpened.data[index + 3] === 0) continue;
-    sharpened.data[index] += (sharpened.data[index] - sharpenBlur.data[index]) * strength;
-    sharpened.data[index + 1] += (sharpened.data[index + 1] - sharpenBlur.data[index + 1]) * strength;
-    sharpened.data[index + 2] += (sharpened.data[index + 2] - sharpenBlur.data[index + 2]) * strength;
+    for (let index = 0; index < sharpened.data.length; index += 4) {
+      if (sharpened.data[index + 3] === 0) continue;
+      sharpened.data[index] += (sharpened.data[index] - sharpenBlur.data[index]) * strength;
+      sharpened.data[index + 1] += (sharpened.data[index + 1] - sharpenBlur.data[index + 1]) * strength;
+      sharpened.data[index + 2] += (sharpened.data[index + 2] - sharpenBlur.data[index + 2]) * strength;
+    }
+    adjustedContext.putImageData(sharpened, 0, 0);
   }
-  adjustedContext.putImageData(sharpened, 0, 0);
-  return adjustedCanvas;
+
+  return applyFaceReshapeAndLipstick(adjustedCanvas, settings);
+}
+
+function applyFaceReshapeAndLipstick(sourceCanvas, settings) {
+  if (settings.faceSlim === 0 && settings.lipstickAmount === 0) return sourceCanvas;
+  const width = sourceCanvas.width;
+  const height = sourceCanvas.height;
+  const faceBox = estimateFaceRegion(sourceCanvas);
+  let resultCanvas = sourceCanvas;
+
+  if (settings.faceSlim !== 0) {
+    const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+    const sourcePixels = sourceContext.getImageData(0, 0, width, height);
+    const outputPixels = new ImageData(new Uint8ClampedArray(sourcePixels.data), width, height);
+    const scale = settings.faceSlim >= 0
+      ? 1 - settings.faceSlim / 50 * 0.2
+      : 1 + Math.abs(settings.faceSlim) / 50 * 0.16;
+    const centerX = faceBox.x + faceBox.width / 2;
+
+    for (let y = Math.floor(faceBox.y); y < Math.ceil(faceBox.y + faceBox.height); y += 1) {
+      for (let x = Math.floor(faceBox.x); x < Math.ceil(faceBox.x + faceBox.width); x += 1) {
+        const sourceX = Math.round(centerX + (x - centerX) / scale);
+        if (sourceX < 0 || sourceX >= width) continue;
+        const targetIndex = (y * width + x) * 4;
+        const sourceIndex = (y * width + sourceX) * 4;
+        outputPixels.data[targetIndex] = sourcePixels.data[sourceIndex];
+        outputPixels.data[targetIndex + 1] = sourcePixels.data[sourceIndex + 1];
+        outputPixels.data[targetIndex + 2] = sourcePixels.data[sourceIndex + 2];
+        outputPixels.data[targetIndex + 3] = sourcePixels.data[sourceIndex + 3];
+      }
+    }
+
+    resultCanvas = document.createElement("canvas");
+    resultCanvas.width = width;
+    resultCanvas.height = height;
+    resultCanvas.getContext("2d").putImageData(outputPixels, 0, 0);
+  }
+
+  if (settings.lipstickAmount <= 0) return resultCanvas;
+
+  const resultContext = resultCanvas.getContext("2d");
+  const [red, green, blue] = hexToRgb(settings.lipstickColor);
+  const mouthX = faceBox.x + faceBox.width / 2;
+  const mouthY = faceBox.y + faceBox.height * 0.68;
+  const radiusX = Math.max(4, faceBox.width * 0.22);
+  const radiusY = Math.max(2, faceBox.height * 0.07);
+  resultContext.save();
+  resultContext.globalCompositeOperation = "source-atop";
+  resultContext.globalAlpha = settings.lipstickAmount / 100 * 0.72;
+  resultContext.filter = "blur(1.5px)";
+  resultContext.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+  resultContext.beginPath();
+  resultContext.ellipse(mouthX, mouthY, radiusX, radiusY, 0, 0, Math.PI * 2);
+  resultContext.fill();
+  resultContext.restore();
+  return resultCanvas;
+}
+
+function estimateFaceRegion(canvas) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const pixels = context.getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  let count = 0;
+
+  for (let y = 0; y < height * 0.68; y += 2) {
+    for (let x = width * 0.25; x < width * 0.75; x += 2) {
+      const index = (y * width + x) * 4;
+      if (pixels[index + 3] < 20) continue;
+      if (skinLikelihood(pixels[index], pixels[index + 1], pixels[index + 2]) < 0.38) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      count += 1;
+    }
+  }
+
+  if (count < 30 || maxX <= minX || maxY <= minY) {
+    return {
+      x: width * 0.32,
+      y: height * 0.08,
+      width: width * 0.36,
+      height: height * 0.42
+    };
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
 }
 
 function skinLikelihood(red, green, blue) {
@@ -2084,7 +2344,9 @@ function syncOutput(id) {
     personContrast: formatSigned(input.value),
     personSaturation: formatSigned(input.value),
     personTemperature: formatSigned(input.value),
-    personSharpen: `${input.value}%`
+    personSharpen: `${input.value}%`,
+    faceSlim: formatSigned(input.value),
+    lipstickAmount: `${input.value}%`
   };
 
   const outputIds = {
@@ -2115,7 +2377,9 @@ function syncOutput(id) {
     personContrast: "personContrastValue",
     personSaturation: "personSaturationValue",
     personTemperature: "personTemperatureValue",
-    personSharpen: "personSharpenValue"
+    personSharpen: "personSharpenValue",
+    faceSlim: "faceSlimValue",
+    lipstickAmount: "lipstickAmountValue"
   };
 
   if (outputIds[id]) document.getElementById(outputIds[id]).textContent = valueMap[id];
@@ -2124,7 +2388,8 @@ function syncOutput(id) {
     backgroundColor: "backgroundHex",
     outlineColor: "outlineHex",
     textColor: "textHex",
-    markerColor: "markerHex"
+    markerColor: "markerHex",
+    lipstickColor: "lipstickHex"
   };
   if (hexOutputs[id]) document.getElementById(hexOutputs[id]).textContent = input.value.toUpperCase();
 
@@ -2153,6 +2418,7 @@ function saveSettings() {
   });
   localStorage.setItem("cover-studio-settings-v2", JSON.stringify(data));
   $("#saveState span").textContent = "已自动保存";
+  scheduleHistoryCommit();
   clearTimeout(toastTimer);
 }
 
@@ -2161,6 +2427,10 @@ function loadSettings() {
     const saved = JSON.parse(localStorage.getItem("cover-studio-settings-v2") || "{}");
     state.template = TEMPLATE_STYLES[saved.__template] ? saved.__template : "classic";
     state.layoutLocked = saved.__layoutLocked !== false;
+    if (saved.markerHeight === "82" && saved.brushY === "0") {
+      saved.markerHeight = "70";
+      saved.brushY = "25";
+    }
     if (saved.fontFamily === "Songti SC") saved.fontFamily = "Source Han Serif CN";
     formIds.forEach((id) => {
       if (saved[id] !== undefined) document.getElementById(id).value = saved[id];

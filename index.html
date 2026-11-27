@@ -193,6 +193,13 @@
 
       <div class="canvas-toolbar glass">
         <div class="toolbar-group">
+          <button class="icon-button" id="undoButton" aria-label="撤销上一步" title="撤销上一步" disabled>
+            <i data-lucide="undo-2"></i>
+          </button>
+          <button class="icon-button" id="redoButton" aria-label="重做下一步" title="重做下一步" disabled>
+            <i data-lucide="redo-2"></i>
+          </button>
+          <span class="toolbar-divider" aria-hidden="true"></span>
           <button class="icon-button" id="zoomOutButton" aria-label="缩小预览" title="缩小预览">
             <i data-lucide="minus"></i>
           </button>
@@ -405,6 +412,21 @@
             <span><span>锐化</span><output id="personSharpenValue">18%</output></span>
             <input id="personSharpen" type="range" min="0" max="150" value="18">
           </label>
+          <label class="slider-field">
+            <span><span>瘦脸</span><output id="faceSlimValue">0</output></span>
+            <input id="faceSlim" type="range" min="-50" max="50" value="0">
+          </label>
+          <label class="slider-field">
+            <span><span>口红浓度</span><output id="lipstickAmountValue">0%</output></span>
+            <input id="lipstickAmount" type="range" min="0" max="100" value="0">
+          </label>
+          <label class="field">
+            <span>口红颜色</span>
+            <span class="color-input-wrap">
+              <input id="lipstickColor" type="color" value="#b2384e">
+              <output id="lipstickHex">#B2384E</output>
+            </span>
+          </label>
         </div>
 
       </section>
@@ -444,16 +466,16 @@
           <input id="titleY" type="range" min="5" max="35" value="14">
         </label>
         <label class="slider-field">
-          <span><span>笔刷粗细</span><output id="markerHeightValue">82%</output></span>
-          <input id="markerHeight" type="range" min="35" max="120" value="82">
+          <span><span>笔刷粗细</span><output id="markerHeightValue">70%</output></span>
+          <input id="markerHeight" type="range" min="35" max="120" value="70">
         </label>
         <label class="slider-field">
           <span><span>左右位置</span><output id="brushXValue">0 px</output></span>
           <input id="brushX" type="range" min="-100" max="100" value="0">
         </label>
         <label class="slider-field">
-          <span><span>上下位置</span><output id="brushYValue">0 px</output></span>
-          <input id="brushY" type="range" min="-100" max="100" value="0">
+          <span><span>上下位置</span><output id="brushYValue">25 px</output></span>
+          <input id="brushY" type="range" min="-100" max="100" value="25">
         </label>
       </section>
 

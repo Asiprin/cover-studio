@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>cover-studio - 多比例封面编辑器</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <div class="ambient-grid" aria-hidden="true"></div>
+
+  <header class="topbar glass">
+    <a class="brand" href="#" aria-label="cover-studio 首页">
+      <img class="brand-mark" src="./icon.svg" alt="">
+      <span>
+        <strong>cover-studio</strong>
+        <small>多比例封面编辑器</small>
+      </span>
+    </a>
+
+    <div class="topbar-actions">
+      <div class="save-state" id="saveState">
+        <i data-lucide="cloud"></i>
+        <span>本地自动保存</span>
+      </div>
+      <div class="theme-switch" role="group" aria-label="界面主题">
+        <button class="icon-button theme-button is-active" data-theme="light" aria-label="浅色主题" title="浅色主题">
+          <i data-lucide="sun"></i>
+        </button>
+        <button class="icon-button theme-button" data-theme="dark" aria-label="深色主题" title="深色主题">
+          <i data-lucide="moon"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="panel glass left-panel" aria-label="素材与文案">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">01 / SOURCE</span>
+          <h1>素材与文案</h1>
+        </div>
+        <button class="icon-button" id="resetButton" aria-label="重置全部设置" title="重置全部设置">
+          <i data-lucide="rotate-ccw"></i>
+        </button>
+      </div>
+
+      <section class="control-section">
+        <div class="section-title">
+          <h2>上传素材</h2>
+          <span class="section-note">支持 JPG、PNG、WEBP</span>
+        </div>
+
+        <label class="upload-zone" id="sceneDrop" for="sceneInput">
+          <input id="sceneInput" type="file" accept="image/*">
+          <span class="upload-icon"><i data-lucide="image-plus"></i></span>
+          <span class="upload-copy">
+            <strong>场景图片</strong>
+            <small id="sceneFileName">点击或拖入图片</small>
+          </span>
+          <i class="upload-arrow" data-lucide="arrow-up-right"></i>
+        </label>
+
+        <label class="upload-zone person-zone" id="personDrop" for="personInput">
+          <input id="personInput" type="file" accept="image/*">
+          <span class="upload-icon"><i data-lucide="scan-face"></i></span>
+          <span class="upload-copy">
+            <strong>人物图片</strong>
+            <small id="personFileName">自动识别并抠出人物</small>
+          </span>
+          <span class="status-dot" id="personStatusDot" aria-hidden="true"></span>
+        </label>
+
+        <div class="ai-status" id="aiStatus" role="status" aria-live="polite">
+          <i data-lucide="sparkles"></i>
+          <span>上传人物后自动抠图</span>
+        </div>
+
+        <div class="model-progress" id="modelProgress" hidden>
+          <div>
+            <span>RMBG-1.4 本地模型</span>
+            <output id="modelProgressValue">0%</output>
+          </div>
+          <div class="progress-track"><span id="modelProgressBar"></span></div>
+        </div>
+      </section>
+
+      <section class="control-section">
+        <div class="section-title">
+          <h2>封面文案</h2>
+          <span class="section-note">建议每行 4–10 字</span>
+        </div>
+
+        <label class="field">
+          <span>第一行</span>
+          <input id="line1Input" type="text" maxlength="18" value="年底团建火锅">
+        </label>
+
+        <label class="field">
+          <span>第二行</span>
+          <input id="line2Input" type="text" maxlength="18" value="我第一筷子不夹肉">
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>系统字体</span>
+            <select id="fontFamily">
+              <option value="Source Han Serif CN" selected>思源宋体</option>
+              <option value="Songti SC">宋体</option>
+              <option value="STSong">华文宋体</option>
+              <option value="PingFang SC">苹方</option>
+              <option value="Hiragino Sans GB">冬青黑体</option>
+              <option value="Kaiti SC">楷体</option>
+              <option value="STKaiti">华文楷体</option>
+              <option value="Arial Black">超粗黑体</option>
+              <option value="Impact">紧凑黑体</option>
+            </select>
+          </label>
+          <button class="icon-button scan-fonts" id="scanFontsButton" aria-label="扫描电脑字体" title="扫描电脑字体">
+            <i data-lucide="scan-search"></i>
+          </button>
+        </div>
+
+        <label class="field">
+          <span>字体粗细</span>
+          <select id="fontWeight">
+            <option value="300">细体 300</option>
+            <option value="400">常规 400</option>
+            <option value="500">中等 500</option>
+            <option value="700">粗体 700</option>
+            <option value="800">特粗 800</option>
+            <option value="900" selected>超粗 900</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="control-section compact">
+        <div class="section-title">
+          <h2>画布颜色</h2>
+          <output class="hex-output" id="backgroundHex">#EEF0EC</output>
+        </div>
+        <label class="color-field">
+          <input id="backgroundColor" type="color" value="#eef0ec">
+          <span>背景色</span>
+          <i data-lucide="pipette"></i>
+        </label>
+      </section>
+    </aside>
+
+    <section class="canvas-column">
+      <div class="ratio-bar glass" role="tablist" aria-label="封面比例">
+        <button class="ratio-tab is-active" data-ratio="portrait-3-4" role="tab" aria-selected="true">
+          <span class="ratio-shape shape-3-4"></span>
+          <span><strong>3:4</strong><small>1080 × 1440</small></span>
+        </button>
+        <button class="ratio-tab" data-ratio="landscape-4-3" role="tab" aria-selected="false">
+          <span class="ratio-shape shape-4-3"></span>
+          <span><strong>4:3</strong><small>1440 × 1080</small></span>
+        </button>
+        <button class="ratio-tab" data-ratio="portrait-9-16" role="tab" aria-selected="false">
+          <span class="ratio-shape shape-9-16"></span>
+          <span><strong>9:16</strong><small>1080 × 1920</small></span>
+        </button>
+        <button class="ratio-tab" data-ratio="landscape-3-2" role="tab" aria-selected="false">
+          <span class="ratio-shape shape-3-2"></span>
+          <span><strong>3:2</strong><small>1620 × 1080</small></span>
+        </button>
+        <button class="ratio-tab" data-ratio="landscape-16-9" role="tab" aria-selected="false">
+          <span class="ratio-shape shape-16-9"></span>
+          <span><strong>16:9</strong><small>1920 × 1080</small></span>
+        </button>
+        <button class="ratio-tab" data-ratio="square-1-1" role="tab" aria-selected="false">
+          <span class="ratio-shape shape-1-1"></span>
+          <span><strong>1:1</strong><small>1080 × 1080</small></span>
+        </button>
+        <button class="ratio-tab" data-ratio="wechat-21-9" role="tab" aria-selected="false">
+          <span class="ratio-shape shape-21-9"></span>
+          <span><strong>21:9</strong><small>2100 × 900</small></span>
+        </button>
+      </div>
+
+      <div class="stage-wrap">
+        <div class="stage" id="stage">
+          <div class="canvas-shell" id="canvasShell">
+            <canvas id="coverCanvas" width="1080" height="1440" aria-label="封面实时预览"></canvas>
+            <div class="canvas-badge" id="canvasBadge">3:4 · 1080 × 1440</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="canvas-toolbar glass">
+        <div class="toolbar-group">
+          <button class="icon-button" id="zoomOutButton" aria-label="缩小预览" title="缩小预览">
+            <i data-lucide="minus"></i>
+          </button>
+          <output id="zoomLabel">适应</output>
+          <button class="icon-button" id="zoomInButton" aria-label="放大预览" title="放大预览">
+            <i data-lucide="plus"></i>
+          </button>
+          <button class="tool-button" id="fitButton">
+            <i data-lucide="maximize"></i>
+            <span>适应画布</span>
+          </button>
+        </div>
+
+        <div class="toolbar-group">
+          <button class="tool-button" id="downloadCurrentButton">
+            <i data-lucide="download"></i>
+            <span>导出当前 PNG</span>
+          </button>
+          <button class="primary-button" id="exportAllButton">
+            <i data-lucide="package-open"></i>
+            <span>一键导出全部</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel glass right-panel" aria-label="排版与样式">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">02 / ART DIRECTION</span>
+          <h1>排版与样式</h1>
+        </div>
+        <span class="live-badge"><span></span> LIVE</span>
+      </div>
+
+      <section class="control-section">
+        <div class="section-title">
+          <h2>封面模板</h2>
+          <span class="section-note">Guizang Layouts</span>
+        </div>
+        <div class="template-grid" id="templatePresets" aria-label="封面模板">
+          <button class="template-card is-active" data-template="classic">
+            <span class="template-preview template-swatch preview-classic"></span>
+            <span><strong>经典拼贴</strong><small>贴纸人物</small></span>
+          </button>
+          <button class="template-card" data-template="ink-classic">
+            <span class="template-preview template-swatch" style="--tpl-paper:#f1efea;--tpl-accent:#111111"></span>
+            <span><strong>墨色杂志</strong><small>纸张与刊号</small></span>
+          </button>
+          <button class="template-card" data-template="indigo-porcelain">
+            <span class="template-preview template-swatch" style="--tpl-paper:#f1f3f5;--tpl-accent:#315d93"></span>
+            <span><strong>蓝瓷研究</strong><small>冷静分析</small></span>
+          </button>
+          <button class="template-card" data-template="forest-ink">
+            <span class="template-preview template-swatch" style="--tpl-paper:#f5f1e8;--tpl-accent:#2e6b4f"></span>
+            <span><strong>森林手记</strong><small>户外观察</small></span>
+          </button>
+          <button class="template-card" data-template="kraft-paper">
+            <span class="template-preview template-swatch" style="--tpl-paper:#eedfc7;--tpl-accent:#9b5a2e"></span>
+            <span><strong>牛皮档案</strong><small>手作记录</small></span>
+          </button>
+          <button class="template-card" data-template="dune">
+            <span class="template-preview template-swatch" style="--tpl-paper:#f0e6d2;--tpl-accent:#8f7650"></span>
+            <span><strong>沙丘画册</strong><small>克制审美</small></span>
+          </button>
+          <button class="template-card" data-template="midnight-ink">
+            <span class="template-preview template-swatch" style="--tpl-paper:#0e0d0c;--tpl-accent:#d4a04a"></span>
+            <span><strong>午夜影像</strong><small>深色大片</small></span>
+          </button>
+          <button class="template-card" data-template="ikb">
+            <span class="template-preview template-swatch" style="--tpl-paper:#fafaf8;--tpl-accent:#002fa7"></span>
+            <span><strong>IKB 系统</strong><small>瑞士网格</small></span>
+          </button>
+          <button class="template-card" data-template="lemon">
+            <span class="template-preview template-swatch" style="--tpl-paper:#fafaf8;--tpl-accent:#ffd500"></span>
+            <span><strong>柠檬发布</strong><small>轻快信息</small></span>
+          </button>
+          <button class="template-card" data-template="safety-orange">
+            <span class="template-preview template-swatch" style="--tpl-paper:#fafaf8;--tpl-accent:#ff6b35"></span>
+            <span><strong>安全橙刊</strong><small>重点提醒</small></span>
+          </button>
+        </div>
+        <div class="template-pager" aria-label="模板翻页">
+          <button class="icon-button" id="templatePrev" aria-label="上一页模板" title="上一页模板">
+            <i data-lucide="chevron-left"></i>
+          </button>
+          <output id="templatePageLabel">1 / 5</output>
+          <button class="icon-button" id="templateNext" aria-label="下一页模板" title="下一页模板">
+            <i data-lucide="chevron-right"></i>
+          </button>
+        </div>
+      </section>
+
+      <div class="right-tabs" role="tablist" aria-label="排版工具">
+        <button class="right-tab is-active" data-right-tab="person" role="tab" aria-selected="true">
+          <i data-lucide="scan-face"></i><span>人物抠图</span>
+        </button>
+        <button class="right-tab" data-right-tab="title" role="tab" aria-selected="false">
+          <i data-lucide="type"></i><span>标题与笔刷</span>
+        </button>
+        <button class="right-tab" data-right-tab="background" role="tab" aria-selected="false">
+          <i data-lucide="image"></i><span>背景处理</span>
+        </button>
+      </div>
+
+      <section class="control-section right-tab-panel" data-right-panel="person">
+        <div class="section-title">
+          <h2>人物抠图</h2>
+          <button class="text-button" id="recutButton">
+            <i data-lucide="refresh-cw"></i>
+            重新抠图
+          </button>
+        </div>
+
+        <div class="field-row">
+          <label class="field">
+            <span>描边颜色</span>
+            <span class="color-input-wrap">
+              <input id="outlineColor" type="color" value="#ffffff">
+              <output id="outlineHex">#FFFFFF</output>
+            </span>
+          </label>
+          <label class="field">
+            <span>描边样式</span>
+            <select id="outlineStyle">
+              <option value="fold" selected>折纸描边</option>
+              <option value="hand">粉笔手绘</option>
+              <option value="smooth">平滑描边</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="slider-field">
+          <span><span>描边粗细</span><output id="outlineWidthValue">28 px</output></span>
+          <input id="outlineWidth" type="range" min="0" max="50" value="28">
+        </label>
+
+        <label class="slider-field">
+          <span><span>抠图边缘</span><output id="edgeValue">精确</output></span>
+          <input id="edgePrecision" type="range" min="1" max="100" value="82">
+        </label>
+
+        <div class="segmented" id="personPresets" aria-label="人物位置预设">
+          <button class="is-active" data-person-preset="right">右侧</button>
+          <button data-person-preset="left">左侧</button>
+          <button data-person-preset="center">居中</button>
+        </div>
+
+        <label class="slider-field">
+          <span><span>人物大小</span><output id="personScaleValue">100%</output></span>
+          <input id="personScale" type="range" min="40" max="160" value="100">
+        </label>
+        <label class="slider-field">
+          <span><span>水平位置</span><output id="personXValue">78%</output></span>
+          <input id="personX" type="range" min="5" max="95" value="78">
+        </label>
+        <label class="slider-field">
+          <span><span>垂直位置</span><output id="personYValue">95%</output></span>
+          <input id="personY" type="range" min="45" max="105" value="95">
+        </label>
+
+        <div class="filter-block">
+          <div class="section-title">
+            <h3>GPUPixel 人像滤镜</h3>
+            <button class="icon-button filter-reset" id="resetPersonFilter" aria-label="重置人像滤镜" title="重置人像滤镜">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+          </div>
+          <label class="field">
+            <span>滤镜预设</span>
+            <select id="personFilterPreset">
+              <option value="clean" selected>清透人像</option>
+              <option value="cream">奶油肌</option>
+              <option value="film">质感胶片</option>
+              <option value="cool">冷白皮</option>
+              <option value="none">原图</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
+          <p class="filter-note">仅作用于人物抠图，不影响场景图片。</p>
+
+          <label class="slider-field">
+            <span><span>磨皮</span><output id="skinSmoothValue">22%</output></span>
+            <input id="skinSmooth" type="range" min="0" max="100" value="22">
+          </label>
+          <label class="slider-field">
+            <span><span>美白</span><output id="skinWhiteValue">10%</output></span>
+            <input id="skinWhite" type="range" min="0" max="100" value="10">
+          </label>
+          <label class="slider-field">
+            <span><span>亮度</span><output id="personBrightnessValue">2</output></span>
+            <input id="personBrightness" type="range" min="-20" max="20" value="2">
+          </label>
+          <label class="slider-field">
+            <span><span>对比度</span><output id="personContrastValue">5</output></span>
+            <input id="personContrast" type="range" min="-20" max="20" value="5">
+          </label>
+          <label class="slider-field">
+            <span><span>饱和度</span><output id="personSaturationValue">4</output></span>
+            <input id="personSaturation" type="range" min="-30" max="30" value="4">
+          </label>
+          <label class="slider-field">
+            <span><span>色温</span><output id="personTemperatureValue">2</output></span>
+            <input id="personTemperature" type="range" min="-25" max="25" value="2">
+          </label>
+          <label class="slider-field">
+            <span><span>锐化</span><output id="personSharpenValue">18%</output></span>
+            <input id="personSharpen" type="range" min="0" max="100" value="18">
+          </label>
+        </div>
+      </section>
+
+      <section class="control-section right-tab-panel" data-right-panel="title" hidden>
+        <div class="section-title"><h2>标题与笔刷</h2></div>
+        <div class="field-row">
+          <label class="field">
+            <span>文字颜色</span>
+            <span class="color-input-wrap">
+              <input id="textColor" type="color" value="#101110">
+              <output id="textHex">#101110</output>
+            </span>
+          </label>
+          <label class="field">
+            <span>笔刷颜色</span>
+            <span class="color-input-wrap">
+              <input id="markerColor" type="color" value="#ffc94d">
+              <output id="markerHex">#FFC94D</output>
+            </span>
+          </label>
+        </div>
+        <label class="field">
+          <span>笔刷样式</span>
+          <select id="markerStyle">
+            <option value="marker" selected>马克笔</option>
+            <option value="highlight">荧光笔</option>
+            <option value="underline">粗下划线</option>
+          </select>
+        </label>
+        <label class="slider-field">
+          <span><span>标题字号</span><output id="titleScaleValue">100%</output></span>
+          <input id="titleScale" type="range" min="65" max="145" value="100">
+        </label>
+        <label class="slider-field">
+          <span><span>标题位置</span><output id="titleYValue">14%</output></span>
+          <input id="titleY" type="range" min="5" max="35" value="14">
+        </label>
+        <label class="slider-field">
+          <span><span>笔刷粗细</span><output id="markerHeightValue">82%</output></span>
+          <input id="markerHeight" type="range" min="35" max="120" value="82">
+        </label>
+        <label class="slider-field">
+          <span><span>左右位置</span><output id="brushXValue">0 px</output></span>
+          <input id="brushX" type="range" min="-100" max="100" value="0">
+        </label>
+        <label class="slider-field">
+          <span><span>上下位置</span><output id="brushYValue">0 px</output></span>
+          <input id="brushY" type="range" min="-100" max="100" value="0">
+        </label>
+      </section>
+
+      <section class="control-section right-tab-panel" data-right-panel="background" hidden>
+        <div class="section-title"><h2>背景处理</h2><span class="section-note">图片与氛围</span></div>
+        <label class="slider-field">
+          <span><span>图片高度</span><output id="mediaHeightValue">58%</output></span>
+          <input id="mediaHeight" type="range" min="35" max="75" value="58">
+        </label>
+        <label class="slider-field">
+          <span><span>图片位置</span><output id="mediaYValue">35%</output></span>
+          <input id="mediaY" type="range" min="25" max="60" value="35">
+        </label>
+        <label class="slider-field">
+          <span><span>明度</span><output id="brightnessValue">100%</output></span>
+          <input id="brightness" type="range" min="50" max="150" value="100">
+        </label>
+        <label class="slider-field">
+          <span><span>饱和度</span><output id="saturationValue">100%</output></span>
+          <input id="saturation" type="range" min="0" max="180" value="100">
+        </label>
+        <label class="slider-field">
+          <span><span>暗角</span><output id="vignetteValue">18%</output></span>
+          <input id="vignette" type="range" min="0" max="100" value="18">
+        </label>
+      </section>
+
+      <div class="export-note">
+        <i data-lucide="shield-check"></i>
+        <p><strong>完全在本地处理</strong><br>图片不会上传到服务器，导出为原始像素尺寸。</p>
+      </div>
+    </aside>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <i data-lucide="check-circle-2"></i>
+    <span>已完成</span>
+  </div>
+
+  <div class="export-overlay" id="exportOverlay" aria-hidden="true">
+    <div class="export-dialog glass">
+      <div class="export-spinner"><i data-lucide="package-open"></i></div>
+      <h2>正在生成全部封面</h2>
+      <p id="exportProgressText">准备画布...</p>
+      <div class="progress-track"><span id="exportProgressBar"></span></div>
+    </div>
+  </div>
+</body>
+</html>

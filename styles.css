@@ -839,6 +839,34 @@ label:focus-within {
   background: var(--field);
 }
 
+.layout-lock-button {
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--muted-strong);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.layout-lock-button svg {
+  width: 14px;
+}
+
+.layout-lock-button.is-locked {
+  border-color: rgba(11, 141, 128, 0.3);
+  background: rgba(11, 141, 128, 0.12);
+  color: var(--teal);
+}
+
+.layout-lock-button:not(.is-locked) {
+  color: var(--accent);
+}
+
 .filter-note {
   margin: 8px 0 0;
   color: var(--muted);
@@ -1054,6 +1082,7 @@ input[type="range"]::-webkit-slider-thumb {
   max-height: calc(100vh - 330px);
   border-radius: 0;
   background: #eef0ec;
+  touch-action: none;
 }
 
 .canvas-badge {

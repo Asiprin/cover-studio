@@ -57,6 +57,8 @@ const state = {
   personFilterTimer: null,
   cutoutMode: "等待上传",
   template: "classic",
+  layoutLocked: true,
+  sceneDrag: null,
   zoom: 1,
   renderQueued: false
 };
@@ -90,6 +92,10 @@ const defaults = {
   backgroundTemperature: "0",
   backgroundBlur: "0",
   vignette: "18",
+  backgroundFilterPreset: "clean",
+  sceneScale: "110",
+  sceneX: "0",
+  sceneY: "0",
   personFilterPreset: "clean",
   skinSmooth: "22",
   skinWhite: "10",
@@ -109,6 +115,14 @@ const PERSON_FILTER_IDS = new Set([
   "personSaturation",
   "personTemperature",
   "personSharpen"
+]);
+const BACKGROUND_FILTER_IDS = new Set([
+  "brightness",
+  "backgroundContrast",
+  "saturation",
+  "backgroundTemperature",
+  "backgroundBlur",
+  "vignette"
 ]);
 
 const PERSON_FILTER_PRESETS = {
@@ -148,6 +162,42 @@ const PERSON_FILTER_PRESETS = {
     personTemperature: -12,
     personSharpen: 22
   },
+  warm: {
+    skinSmooth: 34,
+    skinWhite: 12,
+    personBrightness: 7,
+    personContrast: 8,
+    personSaturation: 16,
+    personTemperature: 28,
+    personSharpen: 24
+  },
+  vintage: {
+    skinSmooth: 18,
+    skinWhite: 0,
+    personBrightness: -4,
+    personContrast: 22,
+    personSaturation: -22,
+    personTemperature: 18,
+    personSharpen: 48
+  },
+  punch: {
+    skinSmooth: 8,
+    skinWhite: 6,
+    personBrightness: -2,
+    personContrast: 38,
+    personSaturation: 28,
+    personTemperature: -5,
+    personSharpen: 72
+  },
+  soft: {
+    skinSmooth: 92,
+    skinWhite: 34,
+    personBrightness: 12,
+    personContrast: -12,
+    personSaturation: -8,
+    personTemperature: 10,
+    personSharpen: 0
+  },
   none: {
     skinSmooth: 0,
     skinWhite: 0,
@@ -156,6 +206,65 @@ const PERSON_FILTER_PRESETS = {
     personSaturation: 0,
     personTemperature: 0,
     personSharpen: 0
+  }
+};
+
+const BACKGROUND_FILTER_PRESETS = {
+  clean: {
+    brightness: 104,
+    backgroundContrast: 104,
+    saturation: 106,
+    backgroundTemperature: 0,
+    backgroundBlur: 0,
+    vignette: 12
+  },
+  warmCinema: {
+    brightness: 98,
+    backgroundContrast: 112,
+    saturation: 95,
+    backgroundTemperature: 18,
+    backgroundBlur: 0,
+    vignette: 28
+  },
+  cool: {
+    brightness: 102,
+    backgroundContrast: 108,
+    saturation: 92,
+    backgroundTemperature: -18,
+    backgroundBlur: 0,
+    vignette: 20
+  },
+  vintage: {
+    brightness: 96,
+    backgroundContrast: 108,
+    saturation: 78,
+    backgroundTemperature: 12,
+    backgroundBlur: 2,
+    vignette: 35
+  },
+  vivid: {
+    brightness: 103,
+    backgroundContrast: 112,
+    saturation: 135,
+    backgroundTemperature: 3,
+    backgroundBlur: 0,
+    vignette: 16
+  },
+  soft: {
+    brightness: 106,
+    backgroundContrast: 92,
+    saturation: 88,
+    backgroundTemperature: 5,
+    backgroundBlur: 12,
+    vignette: 10
+  },
+  none: {
+    brightness: 100,
+    backgroundContrast: 100,
+    saturation: 100,
+    backgroundTemperature: 0,
+    backgroundBlur: 0,
+    vignette: 0
   }
 };
 const canvas = $("#coverCanvas");
@@ -339,9 +448,10 @@ function init() {
   bindTemplatePresets();
   bindTemplatePager();
   bindRightTabs();
-  bindFilterTabs();
   bindCanvasTools();
+  bindPhotoGestures();
   loadSettings();
+  applyLayoutLock();
   syncAllOutputs();
   render();
 }
@@ -858,11 +968,18 @@ function bindControls() {
         applyPersonFilterPreset(input.value);
         return;
       }
+      if (id === "backgroundFilterPreset") {
+        applyBackgroundFilterPreset(input.value);
+        return;
+      }
       syncOutput(id);
       if (PERSON_FILTER_IDS.has(id)) {
         $("#personFilterPreset").value = "custom";
         state.personFilterDirty = true;
         schedulePersonFilter();
+      } else if (BACKGROUND_FILTER_IDS.has(id)) {
+        $("#backgroundFilterPreset").value = "custom";
+        queueRender();
       } else {
         queueRender();
       }
@@ -874,7 +991,9 @@ function bindControls() {
   $("#recutButton").addEventListener("click", recutPerson);
   $("#resetButton").addEventListener("click", resetSettings);
   $("#resetPersonFilter").addEventListener("click", () => applyPersonFilterPreset("clean"));
-  $("#resetBackgroundFilter").addEventListener("click", resetBackgroundFilter);
+  $("#resetBackgroundFilter").addEventListener("click", () => applyBackgroundFilterPreset("clean"));
+  $("#resetPhotoCrop").addEventListener("click", resetPhotoCrop);
+  $("#toggleLayoutLock").addEventListener("click", toggleLayoutLock);
 
   $("#scanFontsButton").addEventListener("click", scanSystemFonts);
 
@@ -961,37 +1080,116 @@ function bindRightTabs() {
   });
 }
 
-function bindFilterTabs() {
-  $$(".filter-tab").forEach((button) => {
-    button.addEventListener("click", () => {
-      const tabName = button.dataset.filterTab;
-      $$(".filter-tab").forEach((item) => {
-        const active = item === button;
-        item.classList.toggle("is-active", active);
-        item.setAttribute("aria-selected", String(active));
-      });
-      $$(".filter-tab-panel").forEach((panel) => {
-        panel.hidden = panel.dataset.filterPanel !== tabName;
-      });
-    });
-  });
-}
+function applyBackgroundFilterPreset(presetName) {
+  if (presetName === "custom") {
+    saveSettings();
+    return;
+  }
 
-function resetBackgroundFilter() {
-  [
-    ["brightness", "100"],
-    ["backgroundContrast", "100"],
-    ["saturation", "100"],
-    ["backgroundTemperature", "0"],
-    ["backgroundBlur", "0"],
-    ["vignette", "18"]
-  ].forEach(([id, value]) => {
-    document.getElementById(id).value = value;
+  const preset = BACKGROUND_FILTER_PRESETS[presetName] || BACKGROUND_FILTER_PRESETS.clean;
+  $("#backgroundFilterPreset").value = presetName;
+  Object.entries(preset).forEach(([id, value]) => {
+    document.getElementById(id).value = String(value);
     syncOutput(id);
   });
   saveSettings();
   queueRender();
-  showToast("背景滤镜已重置");
+  showToast(presetName === "none" ? "背景滤镜已关闭" : "背景滤镜预设已应用");
+}
+
+function resetPhotoCrop() {
+  $("#sceneScale").value = "110";
+  $("#sceneX").value = "0";
+  $("#sceneY").value = "0";
+  ["sceneScale", "sceneX", "sceneY"].forEach(syncOutput);
+  saveSettings();
+  queueRender();
+  showToast("照片裁切已重置");
+}
+
+function toggleLayoutLock() {
+  state.layoutLocked = !state.layoutLocked;
+  applyLayoutLock();
+  saveSettings();
+}
+
+function applyLayoutLock() {
+  const button = $("#toggleLayoutLock");
+  $("#mediaHeight").disabled = state.layoutLocked;
+  $("#mediaY").disabled = state.layoutLocked;
+  button.classList.toggle("is-locked", state.layoutLocked);
+  button.setAttribute("aria-pressed", String(state.layoutLocked));
+  button.title = state.layoutLocked ? "解锁图片高度与位置" : "锁定图片高度与位置";
+  button.innerHTML = `<i data-lucide="${state.layoutLocked ? "lock" : "unlock"}"></i><span>${state.layoutLocked ? "已锁定" : "未锁定"}</span>`;
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function bindPhotoGestures() {
+  const rectForEvent = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left) * canvas.width / rect.width,
+      y: (event.clientY - rect.top) * canvas.height / rect.height,
+      cssWidth: rect.width,
+      cssHeight: rect.height
+    };
+  };
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!state.sceneImage) return;
+    const point = rectForEvent(event);
+    const media = getMediaRect(RATIOS[state.activeRatio]);
+    const inside = point.x >= media.x && point.x <= media.x + media.width && point.y >= media.y && point.y <= media.y + media.height;
+    if (!inside) return;
+    canvas.setPointerCapture(event.pointerId);
+    state.sceneDrag = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      sceneX: Number($("#sceneX").value),
+      sceneY: Number($("#sceneY").value)
+    };
+    canvas.style.cursor = "grabbing";
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!state.sceneDrag || state.sceneDrag.pointerId !== event.pointerId) return;
+    const rect = canvas.getBoundingClientRect();
+    const deltaX = (event.clientX - state.sceneDrag.clientX) / rect.width * 200;
+    const deltaY = (event.clientY - state.sceneDrag.clientY) / rect.height * 200;
+    $("#sceneX").value = String(clamp(state.sceneDrag.sceneX + deltaX, -100, 100));
+    $("#sceneY").value = String(clamp(state.sceneDrag.sceneY + deltaY, -100, 100));
+    syncOutput("sceneX");
+    syncOutput("sceneY");
+    queueRender();
+  });
+
+  const endDrag = (event) => {
+    if (!state.sceneDrag || state.sceneDrag.pointerId !== event.pointerId) return;
+    state.sceneDrag = null;
+    canvas.style.cursor = "grab";
+    saveSettings();
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+
+  canvas.addEventListener("wheel", (event) => {
+    if (!state.sceneImage) return;
+    const point = rectForEvent(event);
+    const media = getMediaRect(RATIOS[state.activeRatio]);
+    const inside = point.x >= media.x && point.x <= media.x + media.width && point.y >= media.y && point.y <= media.y + media.height;
+    if (!inside) return;
+    event.preventDefault();
+    const nextScale = clamp(Number($("#sceneScale").value) - event.deltaY * 0.06, 100, 220);
+    $("#sceneScale").value = String(Math.round(nextScale));
+    syncOutput("sceneScale");
+    queueRender();
+    saveSettings();
+  }, { passive: false });
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function applyTemplate(templateName) {
@@ -1260,7 +1458,16 @@ function drawImageCover(ctx, image, x, y, width, height) {
     sourceY = (image.naturalHeight - sourceHeight) / 2;
   }
 
-  ctx.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
+  const scale = Number($("#sceneScale").value) / 100;
+  const drawWidth = width * scale;
+  const drawHeight = height * scale;
+  const maxOffsetX = Math.max(0, (drawWidth - width) / 2);
+  const maxOffsetY = Math.max(0, (drawHeight - height) / 2);
+  const offsetX = Number($("#sceneX").value) / 100 * maxOffsetX;
+  const offsetY = Number($("#sceneY").value) / 100 * maxOffsetY;
+  const drawX = x + (width - drawWidth) / 2 + offsetX;
+  const drawY = y + (height - drawHeight) / 2 + offsetY;
+  ctx.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, drawX, drawY, drawWidth, drawHeight);
 }
 
 function drawTitle(ctx, ratio) {
@@ -1868,6 +2075,9 @@ function syncOutput(id) {
     backgroundTemperature: formatSigned(input.value),
     backgroundBlur: `${input.value}%`,
     vignette: `${input.value}%`,
+    sceneScale: `${input.value}%`,
+    sceneX: formatSigned(input.value),
+    sceneY: formatSigned(input.value),
     skinSmooth: `${input.value}%`,
     skinWhite: `${input.value}%`,
     personBrightness: formatSigned(input.value),
@@ -1896,6 +2106,9 @@ function syncOutput(id) {
     backgroundTemperature: "backgroundTemperatureValue",
     backgroundBlur: "backgroundBlurValue",
     vignette: "vignetteValue",
+    sceneScale: "sceneScaleValue",
+    sceneX: "sceneXValue",
+    sceneY: "sceneYValue",
     skinSmooth: "skinSmoothValue",
     skinWhite: "skinWhiteValue",
     personBrightness: "personBrightnessValue",
@@ -1931,7 +2144,10 @@ function syncAllOutputs() {
 }
 
 function saveSettings() {
-  const data = { __template: state.template };
+  const data = {
+    __template: state.template,
+    __layoutLocked: state.layoutLocked
+  };
   formIds.forEach((id) => {
     data[id] = document.getElementById(id).value;
   });
@@ -1944,6 +2160,7 @@ function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem("cover-studio-settings-v2") || "{}");
     state.template = TEMPLATE_STYLES[saved.__template] ? saved.__template : "classic";
+    state.layoutLocked = saved.__layoutLocked !== false;
     if (saved.fontFamily === "Songti SC") saved.fontFamily = "Source Han Serif CN";
     formIds.forEach((id) => {
       if (saved[id] !== undefined) document.getElementById(id).value = saved[id];
@@ -1959,6 +2176,7 @@ function loadSettings() {
 
 function resetSettings() {
   state.template = "classic";
+  state.layoutLocked = true;
   templatePage = 0;
   formIds.forEach((id) => {
     document.getElementById(id).value = defaults[id];
@@ -1973,6 +2191,7 @@ function resetSettings() {
   setPersonStatus("idle", "上传人物后自动抠图");
   $$(".template-card").forEach((button) => button.classList.toggle("is-active", button.dataset.template === "classic"));
   setTemplatePage(0);
+  applyLayoutLock();
   $$("#personPresets button").forEach((button, index) => button.classList.toggle("is-active", index === 0));
   syncAllOutputs();
   saveSettings();

@@ -85,7 +85,10 @@ const defaults = {
   mediaHeight: "58",
   mediaY: "35",
   brightness: "100",
+  backgroundContrast: "100",
   saturation: "100",
+  backgroundTemperature: "0",
+  backgroundBlur: "0",
   vignette: "18",
   personFilterPreset: "clean",
   skinSmooth: "22",
@@ -336,6 +339,7 @@ function init() {
   bindTemplatePresets();
   bindTemplatePager();
   bindRightTabs();
+  bindFilterTabs();
   bindCanvasTools();
   loadSettings();
   syncAllOutputs();
@@ -870,6 +874,7 @@ function bindControls() {
   $("#recutButton").addEventListener("click", recutPerson);
   $("#resetButton").addEventListener("click", resetSettings);
   $("#resetPersonFilter").addEventListener("click", () => applyPersonFilterPreset("clean"));
+  $("#resetBackgroundFilter").addEventListener("click", resetBackgroundFilter);
 
   $("#scanFontsButton").addEventListener("click", scanSystemFonts);
 
@@ -954,6 +959,39 @@ function bindRightTabs() {
       });
     });
   });
+}
+
+function bindFilterTabs() {
+  $$(".filter-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tabName = button.dataset.filterTab;
+      $$(".filter-tab").forEach((item) => {
+        const active = item === button;
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-selected", String(active));
+      });
+      $$(".filter-tab-panel").forEach((panel) => {
+        panel.hidden = panel.dataset.filterPanel !== tabName;
+      });
+    });
+  });
+}
+
+function resetBackgroundFilter() {
+  [
+    ["brightness", "100"],
+    ["backgroundContrast", "100"],
+    ["saturation", "100"],
+    ["backgroundTemperature", "0"],
+    ["backgroundBlur", "0"],
+    ["vignette", "18"]
+  ].forEach(([id, value]) => {
+    document.getElementById(id).value = value;
+    syncOutput(id);
+  });
+  saveSettings();
+  queueRender();
+  showToast("背景滤镜已重置");
 }
 
 function applyTemplate(templateName) {
@@ -1123,11 +1161,15 @@ function drawMedia(ctx, ratio) {
   ctx.save();
   ctx.rect(x, y, width, height);
   ctx.clip();
+  ctx.filter = [
+    `brightness(${Number($("#brightness").value)}%)`,
+    `contrast(${Number($("#backgroundContrast").value)}%)`,
+    `saturate(${Number($("#saturation").value)}%)`,
+    `blur(${Number($("#backgroundBlur").value) * 0.045}px)`
+  ].join(" ");
 
   if (state.sceneImage) {
-    ctx.filter = `brightness(${Number($("#brightness").value)}%) saturate(${Number($("#saturation").value)}%)`;
     drawImageCover(ctx, state.sceneImage, x, y, width, height);
-    ctx.filter = "none";
   } else {
     const fallback = ctx.createLinearGradient(x, y, x + width, y + height);
     fallback.addColorStop(0, "#9eb6ac");
@@ -1154,7 +1196,21 @@ function drawMedia(ctx, ratio) {
     ctx.fillText("上传场景图片", x + width / 2, y + height / 2);
   }
 
+  ctx.filter = "none";
+  drawTemperature(ctx, x, y, width, height);
   drawVignette(ctx, x, y, width, height);
+  ctx.restore();
+}
+
+function drawTemperature(ctx, x, y, width, height) {
+  const temperature = Number($("#backgroundTemperature").value);
+  if (temperature === 0) return;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "soft-light";
+  ctx.globalAlpha = Math.abs(temperature) / 30 * 0.32;
+  ctx.fillStyle = temperature > 0 ? "#ff8a3d" : "#4b8dff";
+  ctx.fillRect(x, y, width, height);
   ctx.restore();
 }
 
@@ -1807,7 +1863,10 @@ function syncOutput(id) {
     mediaHeight: `${input.value}%`,
     mediaY: `${input.value}%`,
     brightness: `${input.value}%`,
+    backgroundContrast: `${input.value}%`,
     saturation: `${input.value}%`,
+    backgroundTemperature: formatSigned(input.value),
+    backgroundBlur: `${input.value}%`,
     vignette: `${input.value}%`,
     skinSmooth: `${input.value}%`,
     skinWhite: `${input.value}%`,
@@ -1832,7 +1891,10 @@ function syncOutput(id) {
     mediaHeight: "mediaHeightValue",
     mediaY: "mediaYValue",
     brightness: "brightnessValue",
+    backgroundContrast: "backgroundContrastValue",
     saturation: "saturationValue",
+    backgroundTemperature: "backgroundTemperatureValue",
+    backgroundBlur: "backgroundBlurValue",
     vignette: "vignetteValue",
     skinSmooth: "skinSmoothValue",
     skinWhite: "skinWhiteValue",

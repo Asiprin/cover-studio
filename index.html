@@ -293,8 +293,8 @@
         <button class="right-tab" data-right-tab="title" role="tab" aria-selected="false">
           <i data-lucide="type"></i><span>标题与笔刷</span>
         </button>
-        <button class="right-tab" data-right-tab="background" role="tab" aria-selected="false">
-          <i data-lucide="image"></i><span>背景处理</span>
+        <button class="right-tab" data-right-tab="filters" role="tab" aria-selected="false">
+          <i data-lucide="sliders-horizontal"></i><span>滤镜调节</span>
         </button>
       </div>
 
@@ -354,55 +354,6 @@
           <input id="personY" type="range" min="45" max="105" value="95">
         </label>
 
-        <div class="filter-block">
-          <div class="section-title">
-            <h3>GPUPixel 人像滤镜</h3>
-            <button class="icon-button filter-reset" id="resetPersonFilter" aria-label="重置人像滤镜" title="重置人像滤镜">
-              <i data-lucide="rotate-ccw"></i>
-            </button>
-          </div>
-          <label class="field">
-            <span>滤镜预设</span>
-            <select id="personFilterPreset">
-              <option value="clean" selected>清透人像</option>
-              <option value="cream">奶油肌</option>
-              <option value="film">质感胶片</option>
-              <option value="cool">冷白皮</option>
-              <option value="none">原图</option>
-              <option value="custom">自定义</option>
-            </select>
-          </label>
-          <p class="filter-note">仅作用于人物抠图，不影响场景图片。</p>
-
-          <label class="slider-field">
-            <span><span>磨皮</span><output id="skinSmoothValue">22%</output></span>
-            <input id="skinSmooth" type="range" min="0" max="100" value="22">
-          </label>
-          <label class="slider-field">
-            <span><span>美白</span><output id="skinWhiteValue">10%</output></span>
-            <input id="skinWhite" type="range" min="0" max="100" value="10">
-          </label>
-          <label class="slider-field">
-            <span><span>亮度</span><output id="personBrightnessValue">2</output></span>
-            <input id="personBrightness" type="range" min="-20" max="20" value="2">
-          </label>
-          <label class="slider-field">
-            <span><span>对比度</span><output id="personContrastValue">5</output></span>
-            <input id="personContrast" type="range" min="-20" max="20" value="5">
-          </label>
-          <label class="slider-field">
-            <span><span>饱和度</span><output id="personSaturationValue">4</output></span>
-            <input id="personSaturation" type="range" min="-30" max="30" value="4">
-          </label>
-          <label class="slider-field">
-            <span><span>色温</span><output id="personTemperatureValue">2</output></span>
-            <input id="personTemperature" type="range" min="-25" max="25" value="2">
-          </label>
-          <label class="slider-field">
-            <span><span>锐化</span><output id="personSharpenValue">18%</output></span>
-            <input id="personSharpen" type="range" min="0" max="100" value="18">
-          </label>
-        </div>
       </section>
 
       <section class="control-section right-tab-panel" data-right-panel="title" hidden>
@@ -453,28 +404,117 @@
         </label>
       </section>
 
-      <section class="control-section right-tab-panel" data-right-panel="background" hidden>
-        <div class="section-title"><h2>背景处理</h2><span class="section-note">图片与氛围</span></div>
-        <label class="slider-field">
-          <span><span>图片高度</span><output id="mediaHeightValue">58%</output></span>
-          <input id="mediaHeight" type="range" min="35" max="75" value="58">
-        </label>
-        <label class="slider-field">
-          <span><span>图片位置</span><output id="mediaYValue">35%</output></span>
-          <input id="mediaY" type="range" min="25" max="60" value="35">
-        </label>
-        <label class="slider-field">
-          <span><span>明度</span><output id="brightnessValue">100%</output></span>
-          <input id="brightness" type="range" min="50" max="150" value="100">
-        </label>
-        <label class="slider-field">
-          <span><span>饱和度</span><output id="saturationValue">100%</output></span>
-          <input id="saturation" type="range" min="0" max="180" value="100">
-        </label>
-        <label class="slider-field">
-          <span><span>暗角</span><output id="vignetteValue">18%</output></span>
-          <input id="vignette" type="range" min="0" max="100" value="18">
-        </label>
+      <section class="control-section right-tab-panel" data-right-panel="filters" hidden>
+        <div class="section-title">
+          <h2>滤镜调节</h2>
+          <span class="section-note">GPUPixel / Canvas</span>
+        </div>
+
+        <div class="filter-tabs" role="tablist" aria-label="滤镜类型">
+          <button class="filter-tab is-active" data-filter-tab="background" role="tab" aria-selected="true">
+            <i data-lucide="image"></i><span>背景滤镜</span>
+          </button>
+          <button class="filter-tab" data-filter-tab="person" role="tab" aria-selected="false">
+            <i data-lucide="scan-face"></i><span>人物滤镜</span>
+          </button>
+        </div>
+
+        <div class="filter-tab-panel" data-filter-panel="background">
+          <div class="section-title">
+            <h3>图片排版</h3>
+            <span class="section-note">场景图片</span>
+          </div>
+          <label class="slider-field">
+            <span><span>图片高度</span><output id="mediaHeightValue">58%</output></span>
+            <input id="mediaHeight" type="range" min="35" max="75" value="58">
+          </label>
+          <label class="slider-field">
+            <span><span>图片位置</span><output id="mediaYValue">35%</output></span>
+            <input id="mediaY" type="range" min="25" max="60" value="35">
+          </label>
+
+          <div class="section-title filter-subtitle">
+            <h3>背景参数</h3>
+            <button class="icon-button filter-reset" id="resetBackgroundFilter" aria-label="重置背景滤镜" title="重置背景滤镜">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+          </div>
+          <label class="slider-field">
+            <span><span>明度</span><output id="brightnessValue">100%</output></span>
+            <input id="brightness" type="range" min="50" max="150" value="100">
+          </label>
+          <label class="slider-field">
+            <span><span>对比度</span><output id="backgroundContrastValue">100%</output></span>
+            <input id="backgroundContrast" type="range" min="60" max="160" value="100">
+          </label>
+          <label class="slider-field">
+            <span><span>饱和度</span><output id="saturationValue">100%</output></span>
+            <input id="saturation" type="range" min="0" max="180" value="100">
+          </label>
+          <label class="slider-field">
+            <span><span>色温</span><output id="backgroundTemperatureValue">0</output></span>
+            <input id="backgroundTemperature" type="range" min="-30" max="30" value="0">
+          </label>
+          <label class="slider-field">
+            <span><span>模糊</span><output id="backgroundBlurValue">0%</output></span>
+            <input id="backgroundBlur" type="range" min="0" max="100" value="0">
+          </label>
+          <label class="slider-field">
+            <span><span>暗角</span><output id="vignetteValue">18%</output></span>
+            <input id="vignette" type="range" min="0" max="100" value="18">
+          </label>
+        </div>
+
+        <div class="filter-tab-panel" data-filter-panel="person" hidden>
+          <div class="filter-block">
+            <div class="section-title">
+              <h3>GPUPixel 人像滤镜</h3>
+              <button class="icon-button filter-reset" id="resetPersonFilter" aria-label="重置人像滤镜" title="重置人像滤镜">
+                <i data-lucide="rotate-ccw"></i>
+              </button>
+            </div>
+            <label class="field">
+              <span>滤镜预设</span>
+              <select id="personFilterPreset">
+                <option value="clean" selected>清透人像</option>
+                <option value="cream">奶油肌</option>
+                <option value="film">质感胶片</option>
+                <option value="cool">冷白皮</option>
+                <option value="none">原图</option>
+                <option value="custom">自定义</option>
+              </select>
+            </label>
+            <p class="filter-note">仅作用于人物抠图，不影响场景图片。</p>
+            <label class="slider-field">
+              <span><span>磨皮</span><output id="skinSmoothValue">22%</output></span>
+              <input id="skinSmooth" type="range" min="0" max="100" value="22">
+            </label>
+            <label class="slider-field">
+              <span><span>美白</span><output id="skinWhiteValue">10%</output></span>
+              <input id="skinWhite" type="range" min="0" max="100" value="10">
+            </label>
+            <label class="slider-field">
+              <span><span>亮度</span><output id="personBrightnessValue">2</output></span>
+              <input id="personBrightness" type="range" min="-20" max="20" value="2">
+            </label>
+            <label class="slider-field">
+              <span><span>对比度</span><output id="personContrastValue">5</output></span>
+              <input id="personContrast" type="range" min="-20" max="20" value="5">
+            </label>
+            <label class="slider-field">
+              <span><span>饱和度</span><output id="personSaturationValue">4</output></span>
+              <input id="personSaturation" type="range" min="-30" max="30" value="4">
+            </label>
+            <label class="slider-field">
+              <span><span>色温</span><output id="personTemperatureValue">2</output></span>
+              <input id="personTemperature" type="range" min="-25" max="25" value="2">
+            </label>
+            <label class="slider-field">
+              <span><span>锐化</span><output id="personSharpenValue">18%</output></span>
+              <input id="personSharpen" type="range" min="0" max="100" value="18">
+            </label>
+          </div>
+        </div>
       </section>
 
       <div class="export-note">

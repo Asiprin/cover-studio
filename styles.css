@@ -641,6 +641,54 @@ label:focus-within {
   display: none;
 }
 
+.filter-tabs {
+  margin: 2px 0 16px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.filter-tab {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.filter-tab svg {
+  width: 15px;
+}
+
+.filter-tab:hover,
+.filter-tab.is-active {
+  background: var(--panel-strong);
+  color: var(--ink);
+}
+
+.filter-tab.is-active {
+  box-shadow: 0 5px 14px rgba(38, 53, 48, 0.08);
+}
+
+.filter-tab-panel[hidden] {
+  display: none;
+}
+
+.filter-subtitle {
+  margin-top: 20px;
+}
+
 .field {
   display: grid;
   gap: 7px;

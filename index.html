@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <title>cover-studio - 多比例封面编辑器</title>
   <link rel="stylesheet" href="./styles.css">
-  <script defer src="./app.js?v=4b07138-person-bg-drag"></script>
+  <script defer src="./app.js?v=4b07138-selection-border-fix"></script>
 </head>
 <body>
   <div class="ambient-grid" aria-hidden="true"></div>
@@ -187,6 +187,23 @@
           <div class="canvas-shell" id="canvasShell">
             <canvas id="coverCanvas" width="1080" height="1440" aria-label="封面实时预览"></canvas>
             <div class="canvas-badge" id="canvasBadge">3:4 · 1080 × 1440</div>
+            <div class="selection-overlay" id="selectionOverlay" aria-hidden="true" hidden>
+              <div class="selection-box" id="selectionBox">
+                <span class="selection-caption" id="selectionCaption"></span>
+                <i class="selection-handle" data-handle="nw"></i>
+                <i class="selection-handle" data-handle="n"></i>
+                <i class="selection-handle" data-handle="ne"></i>
+                <i class="selection-handle" data-handle="e"></i>
+                <i class="selection-handle" data-handle="se"></i>
+                <i class="selection-handle" data-handle="s"></i>
+                <i class="selection-handle" data-handle="sw"></i>
+                <i class="selection-handle" data-handle="w"></i>
+                <i class="selection-edge" data-handle="n"></i>
+                <i class="selection-edge" data-handle="e"></i>
+                <i class="selection-edge" data-handle="s"></i>
+                <i class="selection-edge" data-handle="w"></i>
+              </div>
+            </div>
             <textarea class="canvas-text-editor" id="canvasTextEditor" hidden aria-label="编辑画布文字"></textarea>
           </div>
         </div>

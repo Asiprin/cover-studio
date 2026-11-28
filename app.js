@@ -52,6 +52,8 @@ const state = {
   personImage: null,
   personCutout: null,
   personOriginalCutout: null,
+  personAdjustedCutout: null,
+  personMatteMask: null,
   personFiltered: null,
   personBounds: null,
   personDrawTransform: null,
@@ -656,6 +658,8 @@ async function recutPerson() {
     button.disabled = false;
     if (completed && state.personCutout) {
       state.personOriginalCutout = cloneCanvas(state.personCutout);
+      state.personMatteMask = createWhiteMask(state.personCutout.width, state.personCutout.height);
+      state.personAdjustedCutout = cloneCanvas(state.personCutout);
       flashCanvasUpdate();
       showToast("人物调节已更新");
       scheduleHistoryCommit(120);
@@ -665,6 +669,16 @@ async function recutPerson() {
     schedulePersonFilter(0);
     queueRender();
   }
+}
+
+function createWhiteMask(width, height) {
+  const mask = document.createElement("canvas");
+  mask.width = width;
+  mask.height = height;
+  const context = mask.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  return mask;
 }
 
 function cloneCanvas(sourceCanvas) {
@@ -979,9 +993,9 @@ function composeCutout(source, alphaMask, width, height) {
   cutout.height = height;
   const cutoutContext = cutout.getContext("2d");
   cutoutContext.drawImage(source, 0, 0);
+  const cleanMask = cleanMaskCanvas(alphaMask);
   cutoutContext.globalCompositeOperation = "destination-in";
-  cutoutContext.filter = "blur(1px)";
-  cutoutContext.drawImage(alphaMask, 0, 0, width, height);
+  cutoutContext.drawImage(cleanMask, 0, 0, width, height);
   cutoutContext.filter = "none";
   cutoutContext.globalCompositeOperation = "source-over";
 
@@ -989,6 +1003,25 @@ function composeCutout(source, alphaMask, width, height) {
     canvas: cutout,
     bounds: findAlphaBounds(cutout)
   };
+}
+
+function cleanMaskCanvas(maskCanvas) {
+  const width = maskCanvas.width;
+  const height = maskCanvas.height;
+  const context = maskCanvas.getContext("2d", { willReadFrequently: true });
+  const pixels = context.getImageData(0, 0, width, height);
+  const alpha = new Uint8Array(width * height);
+  for (let index = 0; index < alpha.length; index += 1) {
+    const value = pixels.data[index * 4 + 3] / 255;
+    alpha[index] = Math.max(0, Math.min(255, Math.round(smoothstep(0.08, 0.58, value) * 255)));
+    pixels.data[index * 4 + 3] = alpha[index];
+  }
+
+  const cleaned = document.createElement("canvas");
+  cleaned.width = width;
+  cleaned.height = height;
+  cleaned.getContext("2d").putImageData(pixels, 0, 0);
+  return cleaned;
 }
 
 function findAlphaBounds(sourceCanvas) {
@@ -1272,7 +1305,7 @@ function bindPhotoGestures() {
   const endDrag = (event) => {
     if (state.matteStroke && state.matteStroke.pointerId === event.pointerId) {
       state.matteStroke = null;
-      state.personBounds = findAlphaBounds(state.personCutout);
+      state.personBounds = findAlphaBounds(state.personAdjustedCutout || state.personCutout);
       state.personFiltered = null;
       state.personFilterDirty = true;
       schedulePersonFilter(60);
@@ -1332,20 +1365,38 @@ function continueMatteStroke(stroke, point) {
 }
 
 function applyMattePoint(stroke, point) {
-  const context = state.personCutout.getContext("2d");
+  const maskContext = state.personMatteMask.getContext("2d");
+  const adjustedContext = state.personAdjustedCutout.getContext("2d");
   const radius = Math.max(2, stroke.radius);
-  context.save();
-  context.beginPath();
-  context.arc(point.x, point.y, radius, 0, Math.PI * 2);
   if (stroke.tool === "brush") {
-    context.clip();
-    context.drawImage(state.personOriginalCutout, 0, 0);
+    maskContext.save();
+    maskContext.fillStyle = "#ffffff";
+    maskContext.beginPath();
+    maskContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    maskContext.fill();
+    maskContext.restore();
+
+    adjustedContext.save();
+    adjustedContext.beginPath();
+    adjustedContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    adjustedContext.clip();
+    adjustedContext.drawImage(state.personOriginalCutout, 0, 0);
+    adjustedContext.restore();
   } else {
-    context.clip();
-    context.globalCompositeOperation = "destination-out";
-    context.fill();
+    maskContext.save();
+    maskContext.globalCompositeOperation = "destination-out";
+    maskContext.beginPath();
+    maskContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    maskContext.fill();
+    maskContext.restore();
+
+    adjustedContext.save();
+    adjustedContext.globalCompositeOperation = "destination-out";
+    adjustedContext.beginPath();
+    adjustedContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    adjustedContext.fill();
+    adjustedContext.restore();
   }
-  context.restore();
 }
 
 function findTitleHit(point) {
@@ -1475,8 +1526,9 @@ function resetMatte() {
     showToast("请先上传并抠出人物");
     return;
   }
-  state.personCutout = cloneCanvas(state.personOriginalCutout);
-  state.personBounds = findAlphaBounds(state.personCutout);
+  state.personAdjustedCutout = cloneCanvas(state.personOriginalCutout);
+  state.personMatteMask = createWhiteMask(state.personAdjustedCutout.width, state.personAdjustedCutout.height);
+  state.personBounds = findAlphaBounds(state.personAdjustedCutout);
   state.personFiltered = null;
   state.personFilterDirty = true;
   schedulePersonFilter(0);
@@ -1512,6 +1564,8 @@ function createHistorySnapshot() {
     personImage: state.personImage,
     personCutout: state.personCutout,
     personOriginalCutout: state.personOriginalCutout,
+    personAdjustedCutout: state.personAdjustedCutout,
+    personMatteMask: state.personMatteMask,
     personFiltered: state.personFiltered,
     personBounds: state.personBounds,
     cutoutMode: state.cutoutMode
@@ -1529,6 +1583,8 @@ function snapshotSignature(snapshot) {
     personImage: getAssetId(snapshot.personImage),
     personCutout: getAssetId(snapshot.personCutout),
     personOriginalCutout: getAssetId(snapshot.personOriginalCutout),
+    personAdjustedCutout: getAssetId(snapshot.personAdjustedCutout),
+    personMatteMask: getAssetId(snapshot.personMatteMask),
     personFiltered: getAssetId(snapshot.personFiltered)
   });
 }
@@ -1557,6 +1613,8 @@ function restoreHistorySnapshot(snapshot) {
   state.personImage = snapshot.personImage;
   state.personCutout = snapshot.personCutout;
   state.personOriginalCutout = snapshot.personOriginalCutout;
+  state.personAdjustedCutout = snapshot.personAdjustedCutout;
+  state.personMatteMask = snapshot.personMatteMask;
   state.personFiltered = snapshot.personFiltered;
   state.personBounds = snapshot.personBounds;
   state.cutoutMode = snapshot.cutoutMode;
@@ -2284,8 +2342,9 @@ function hexToRgb(hex) {
 function schedulePersonFilter(delay = 110) {
   clearTimeout(state.personFilterTimer);
   state.personFilterTimer = setTimeout(() => {
-    if (!state.personCutout) return;
-    state.personFiltered = applyGPUPixelPersonFilter(state.personCutout);
+    const adjustedSource = state.personAdjustedCutout || state.personCutout;
+    if (!adjustedSource) return;
+    state.personFiltered = applyGPUPixelPersonFilter(adjustedSource);
     state.personFilterDirty = false;
     queueRender();
   }, delay);
@@ -2430,7 +2489,7 @@ function drawPerson(ctx, ratio) {
   const outlineWidth = Number($("#outlineWidth").value) * Math.min(1.25, Math.max(0.85, width / 1080));
   const outlineColor = $("#outlineColor").value;
   const outlineStyle = $("#outlineStyle").value;
-  const source = state.personCutout;
+  const source = state.personAdjustedCutout || state.personCutout;
   const filteredSource = state.personFiltered || source;
   const drawX = -targetWidth / 2;
   const drawY = -targetHeight;
@@ -2637,6 +2696,8 @@ function resetSettings() {
   state.personImage = null;
   state.personCutout = null;
   state.personOriginalCutout = null;
+  state.personAdjustedCutout = null;
+  state.personMatteMask = null;
   state.personFiltered = null;
   state.personBounds = null;
   setMatteTool("none");

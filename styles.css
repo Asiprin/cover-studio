@@ -1113,6 +1113,100 @@ input[type="range"]::-webkit-slider-thumb {
   font-size: 8px;
 }
 
+.selection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.selection-box {
+  position: absolute;
+  border: 1.5px solid var(--teal);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.selection-caption {
+  position: absolute;
+  left: -1px;
+  bottom: calc(100% + 5px);
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--teal);
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.selection-handle {
+  position: absolute;
+  z-index: 2;
+  width: var(--selection-handle-size, 12px);
+  height: var(--selection-handle-size, 12px);
+  border: 1px solid var(--teal);
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transform: translate(-50%, -50%);
+  pointer-events: all;
+  touch-action: none;
+}
+
+.selection-handle[data-handle="nw"] { left: 0; top: 0; }
+.selection-handle[data-handle="n"] { left: 50%; top: 0; }
+.selection-handle[data-handle="ne"] { left: 100%; top: 0; }
+.selection-handle[data-handle="e"] { left: 100%; top: 50%; }
+.selection-handle[data-handle="se"] { left: 100%; top: 100%; }
+.selection-handle[data-handle="s"] { left: 50%; top: 100%; }
+.selection-handle[data-handle="sw"] { left: 0; top: 100%; }
+.selection-handle[data-handle="w"] { left: 0; top: 50%; }
+
+.selection-edge {
+  position: absolute;
+  z-index: 1;
+  pointer-events: all;
+  touch-action: none;
+}
+
+.selection-edge[data-handle="n"] {
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 12px;
+  transform: translateY(-50%);
+  cursor: ns-resize;
+}
+
+.selection-edge[data-handle="e"] {
+  right: 0;
+  top: 0;
+  width: 12px;
+  height: 100%;
+  transform: translateX(50%);
+  cursor: ew-resize;
+}
+
+.selection-edge[data-handle="s"] {
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 12px;
+  transform: translateY(50%);
+  cursor: ns-resize;
+}
+
+.selection-edge[data-handle="w"] {
+  left: 0;
+  top: 0;
+  width: 12px;
+  height: 100%;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+
 .canvas-text-editor {
   position: absolute;
   z-index: 8;

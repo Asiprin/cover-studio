@@ -55,6 +55,7 @@ const state = {
   personFiltered: null,
   personBounds: null,
   personDrawTransform: null,
+  sceneDrawTransform: null,
   matteTool: "none",
   matteStroke: null,
   personFilterDirty: true,
@@ -64,6 +65,7 @@ const state = {
   layoutLocked: true,
   personDrag: null,
   sceneDrag: null,
+  selectedTarget: "none",
   titleHitAreas: [],
   pendingTextClick: null,
   textEditorOriginal: "",
@@ -474,6 +476,7 @@ function init() {
   bindRightTabs();
   bindCanvasTools();
   bindPhotoGestures();
+  bindSelectionHandles();
   bindCanvasTextEditor();
   bindMatteTools();
   bindHistoryControls();
@@ -1196,6 +1199,97 @@ function applyLayoutLock() {
   if (window.lucide) window.lucide.createIcons();
 }
 
+function setSelectionTarget(target) {
+  state.selectedTarget = target;
+  updateSelectionOverlay();
+}
+
+function getSelectionBounds(target = state.selectedTarget) {
+  if (target === "scene" && state.sceneImage) {
+    return state.sceneDrawTransform || getMediaRect(RATIOS[state.activeRatio]);
+  }
+  if (target === "person" && state.personDrawTransform) {
+    const { left, top, width, height } = state.personDrawTransform;
+    return { x: left, y: top, width, height };
+  }
+  if (target === "line1" || target === "line2") {
+    const inputId = target === "line1" ? "line1Input" : "line2Input";
+    return state.titleHitAreas.find((area) => area.inputId === inputId) || null;
+  }
+  return null;
+}
+
+function updateSelectionOverlay() {
+  const overlay = $("#selectionOverlay");
+  const box = $("#selectionBox");
+  const caption = $("#selectionCaption");
+  const bounds = getSelectionBounds();
+  if (!overlay || !box || !caption) return;
+  overlay.hidden = !bounds;
+  if (!bounds) return;
+
+  box.style.left = `${bounds.x / canvas.width * 100}%`;
+  box.style.top = `${bounds.y / canvas.height * 100}%`;
+  box.style.width = `${bounds.width / canvas.width * 100}%`;
+  box.style.height = `${bounds.height / canvas.height * 100}%`;
+  box.style.setProperty("--selection-handle-size", `${12 / state.zoom}px`);
+  caption.textContent = {
+    scene: "背景图片",
+    person: "人物",
+    line1: "标题 1",
+    line2: "标题 2"
+  }[state.selectedTarget] || "";
+}
+
+function bindSelectionHandles() {
+  $$("#selectionBox .selection-handle, #selectionBox .selection-edge").forEach((handle) => {
+    handle.addEventListener("pointerdown", (event) => {
+      startSelectionResize(event, handle.dataset.handle || "se");
+    });
+  });
+}
+
+function startSelectionResize(event, handleName) {
+  if (event.button !== 0) return;
+  const inputId = {
+    person: "personScale",
+    scene: "sceneScale",
+    line1: "titleScale",
+    line2: "titleScale"
+  }[state.selectedTarget];
+  if (!inputId) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const input = document.getElementById(inputId);
+  const startValue = Number(input.value);
+  const startClientX = event.clientX;
+  const startClientY = event.clientY;
+  const rect = canvas.getBoundingClientRect();
+  const directionX = handleName.includes("e") ? 1 : handleName.includes("w") ? -1 : 0;
+  const directionY = handleName.includes("s") ? 1 : handleName.includes("n") ? -1 : 0;
+
+  const move = (moveEvent) => {
+    const deltaX = (moveEvent.clientX - startClientX) / rect.width * 100;
+    const deltaY = (moveEvent.clientY - startClientY) / rect.height * 100;
+    const delta = deltaX * directionX + deltaY * directionY;
+    const nextValue = clamp(startValue + delta, Number(input.min), Number(input.max));
+    input.value = String(Math.round(nextValue));
+    syncOutput(inputId);
+    queueRender();
+  };
+
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    saveSettings();
+    scheduleHistoryCommit(100);
+  };
+
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
 function bindPhotoGestures() {
   const rectForEvent = (event) => {
     const rect = canvas.getBoundingClientRect();
@@ -1207,6 +1301,10 @@ function bindPhotoGestures() {
     };
   };
 
+  $("#stage").addEventListener("pointerdown", (event) => {
+    if (!event.target.closest("#canvasShell")) setSelectionTarget("none");
+  });
+
   canvas.addEventListener("pointerdown", (event) => {
     const point = rectForEvent(event);
     if (state.matteTool !== "none" && state.personCutout && state.personDrawTransform) {
@@ -1214,6 +1312,7 @@ function bindPhotoGestures() {
       const insidePerson = point.x >= transform.left && point.x <= transform.left + transform.width &&
         point.y >= transform.top && point.y <= transform.top + transform.height;
       if (insidePerson) {
+        setSelectionTarget("person");
         canvas.setPointerCapture(event.pointerId);
         state.matteStroke = {
           pointerId: event.pointerId,
@@ -1229,6 +1328,7 @@ function bindPhotoGestures() {
     }
     const textHit = findTitleHit(point);
     if (textHit && state.matteTool === "none") {
+      setSelectionTarget(textHit.inputId === "line1Input" ? "line1" : "line2");
       state.pendingTextClick = {
         pointerId: event.pointerId,
         clientX: event.clientX,
@@ -1239,6 +1339,7 @@ function bindPhotoGestures() {
       return;
     }
     if (state.matteTool === "none" && isPointInsidePerson(point)) {
+      setSelectionTarget("person");
       canvas.setPointerCapture(event.pointerId);
       state.personDrag = {
         pointerId: event.pointerId,
@@ -1250,10 +1351,17 @@ function bindPhotoGestures() {
       canvas.style.cursor = "grabbing";
       return;
     }
-    if (!state.sceneImage) return;
+    if (!state.sceneImage) {
+      setSelectionTarget("none");
+      return;
+    }
     const media = getMediaRect(RATIOS[state.activeRatio]);
     const inside = point.x >= media.x && point.x <= media.x + media.width && point.y >= media.y && point.y <= media.y + media.height;
-    if (!inside) return;
+    if (!inside) {
+      setSelectionTarget("none");
+      return;
+    }
+    setSelectionTarget("scene");
     canvas.setPointerCapture(event.pointerId);
     state.sceneDrag = {
       pointerId: event.pointerId,
@@ -1339,6 +1447,7 @@ function bindPhotoGestures() {
   canvas.addEventListener("wheel", (event) => {
     const point = rectForEvent(event);
     if (state.matteTool === "none" && isPointInsidePerson(point)) {
+      setSelectionTarget("person");
       event.preventDefault();
       const personScale = $("#personScale");
       const nextScale = clamp(Number(personScale.value) - event.deltaY * 0.06, Number(personScale.min), Number(personScale.max));
@@ -1353,6 +1462,7 @@ function bindPhotoGestures() {
     const media = getMediaRect(RATIOS[state.activeRatio]);
     const inside = point.x >= media.x && point.x <= media.x + media.width && point.y >= media.y && point.y <= media.y + media.height;
     if (!inside) return;
+    setSelectionTarget("scene");
     event.preventDefault();
     const nextScale = clamp(Number($("#sceneScale").value) - event.deltaY * 0.06, 100, 220);
     $("#sceneScale").value = String(Math.round(nextScale));
@@ -1702,6 +1812,7 @@ function render(targetCanvas = canvas, ratioId = state.activeRatio) {
   drawMedia(ctx, ratio);
   drawPerson(ctx, ratio);
   drawTitle(ctx, ratio);
+  if (targetCanvas === canvas) updateSelectionOverlay();
 }
 
 function drawPaperTexture(ctx, width, height) {
@@ -1912,6 +2023,7 @@ function getSceneCrop(image, width, height) {
 
 function drawImageCover(ctx, image, x, y, width, height) {
   const crop = getSceneCrop(image, width, height);
+  if (ctx.canvas === canvas) state.sceneDrawTransform = { x, y, width, height };
   ctx.drawImage(
     image,
     crop.sourceX,
@@ -2705,11 +2817,13 @@ function resetSettings() {
     document.getElementById(id).value = defaults[id];
   });
   state.sceneImage = null;
+  state.sceneDrawTransform = null;
   state.personImage = null;
   state.personCutout = null;
   state.personOriginalCutout = null;
   state.personFiltered = null;
   state.personBounds = null;
+  state.selectedTarget = "none";
   setMatteTool("none");
   $("#sceneFileName").textContent = "点击或拖入图片";
   $("#personFileName").textContent = "自动识别并抠出人物";

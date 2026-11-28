@@ -103,10 +103,7 @@ const defaults = {
   personContrast: "5",
   personSaturation: "4",
   personTemperature: "2",
-  personSharpen: "18",
-  faceSlim: "0",
-  lipstickAmount: "0",
-  lipstickColor: "#b2384e"
+  personSharpen: "18"
 };
 
 const formIds = Object.keys(defaults);
@@ -117,10 +114,7 @@ const PERSON_FILTER_IDS = new Set([
   "personContrast",
   "personSaturation",
   "personTemperature",
-  "personSharpen",
-  "faceSlim",
-  "lipstickAmount",
-  "lipstickColor"
+  "personSharpen"
 ]);
 const BACKGROUND_FILTER_IDS = new Set([
   "brightness",
@@ -175,10 +169,7 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 8,
     personSaturation: 16,
     personTemperature: 28,
-    personSharpen: 24,
-    faceSlim: 4,
-    lipstickAmount: 30,
-    lipstickColor: "#c84b55"
+    personSharpen: 24
   },
   vintage: {
     skinSmooth: 18,
@@ -187,10 +178,7 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 22,
     personSaturation: -22,
     personTemperature: 18,
-    personSharpen: 48,
-    faceSlim: 2,
-    lipstickAmount: 22,
-    lipstickColor: "#9e3840"
+    personSharpen: 48
   },
   punch: {
     skinSmooth: 8,
@@ -199,10 +187,7 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 38,
     personSaturation: 28,
     personTemperature: -5,
-    personSharpen: 72,
-    faceSlim: 8,
-    lipstickAmount: 35,
-    lipstickColor: "#d34254"
+    personSharpen: 72
   },
   soft: {
     skinSmooth: 92,
@@ -211,10 +196,7 @@ const PERSON_FILTER_PRESETS = {
     personContrast: -12,
     personSaturation: -8,
     personTemperature: 10,
-    personSharpen: 0,
-    faceSlim: 5,
-    lipstickAmount: 12,
-    lipstickColor: "#d77a83"
+    personSharpen: 0
   },
   none: {
     skinSmooth: 0,
@@ -1052,12 +1034,7 @@ function applyPersonFilterPreset(presetName) {
     return;
   }
 
-  const preset = {
-    faceSlim: 0,
-    lipstickAmount: 0,
-    lipstickColor: "#b2384e",
-    ...(PERSON_FILTER_PRESETS[presetName] || PERSON_FILTER_PRESETS.clean)
-  };
+  const preset = PERSON_FILTER_PRESETS[presetName] || PERSON_FILTER_PRESETS.clean;
   $("#personFilterPreset").value = presetName;
   Object.entries(preset).forEach(([id, value]) => {
     document.getElementById(id).value = String(value);
@@ -1471,19 +1448,10 @@ function drawTemplateMetadata(ctx, width, height) {
   const family = templateStyle.family || "classic";
   if (family === "classic") return;
 
-  const isDark = family === "midnight";
   const accent = templateStyle.markerColor;
-  const ink = isDark ? "#ece2cf" : "#262522";
   const margin = width * 0.055;
 
   ctx.save();
-  ctx.fillStyle = ink;
-  ctx.globalAlpha = isDark ? 0.82 : 0.62;
-  ctx.font = `600 ${Math.max(13, width * 0.012)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  ctx.fillText(family === "swiss" ? "COVER / 01" : "ISSUE 01 · COVER", margin, height * 0.042);
-
   ctx.fillStyle = accent;
   ctx.globalAlpha = 0.92;
   if (family === "swiss") {
@@ -1492,10 +1460,6 @@ function drawTemplateMetadata(ctx, width, height) {
   } else {
     ctx.fillRect(margin, height * 0.078, Math.max(3, width * 0.003), height * 0.105);
     ctx.fillRect(margin, height * 0.915, width * 0.89, Math.max(1, width * 0.0014));
-    ctx.globalAlpha = isDark ? 0.62 : 0.48;
-    ctx.fillStyle = ink;
-    ctx.font = `500 ${Math.max(11, width * 0.009)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    ctx.fillText("COVER STORY · VISUAL NOTE", margin, height * 0.932);
   }
   ctx.restore();
 }
@@ -2044,12 +2008,9 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
     contrast: Number($("#personContrast").value),
     saturation: Number($("#personSaturation").value),
     temperature: Number($("#personTemperature").value),
-    sharpen: Number($("#personSharpen").value),
-    faceSlim: Number($("#faceSlim").value),
-    lipstickAmount: Number($("#lipstickAmount").value),
-    lipstickColor: $("#lipstickColor").value
+    sharpen: Number($("#personSharpen").value)
   };
-  const unchanged = ["smooth", "white", "brightness", "contrast", "saturation", "temperature", "sharpen", "faceSlim", "lipstickAmount"]
+  const unchanged = ["smooth", "white", "brightness", "contrast", "saturation", "temperature", "sharpen"]
     .every((key) => settings[key] === 0);
   if (unchanged) return sourceCanvas;
 
@@ -2135,103 +2096,7 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
     adjustedContext.putImageData(sharpened, 0, 0);
   }
 
-  return applyFaceReshapeAndLipstick(adjustedCanvas, settings);
-}
-
-function applyFaceReshapeAndLipstick(sourceCanvas, settings) {
-  if (settings.faceSlim === 0 && settings.lipstickAmount === 0) return sourceCanvas;
-  const width = sourceCanvas.width;
-  const height = sourceCanvas.height;
-  const faceBox = estimateFaceRegion(sourceCanvas);
-  let resultCanvas = sourceCanvas;
-
-  if (settings.faceSlim !== 0) {
-    const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
-    const sourcePixels = sourceContext.getImageData(0, 0, width, height);
-    const outputPixels = new ImageData(new Uint8ClampedArray(sourcePixels.data), width, height);
-    const scale = settings.faceSlim >= 0
-      ? 1 - settings.faceSlim / 50 * 0.2
-      : 1 + Math.abs(settings.faceSlim) / 50 * 0.16;
-    const centerX = faceBox.x + faceBox.width / 2;
-
-    for (let y = Math.floor(faceBox.y); y < Math.ceil(faceBox.y + faceBox.height); y += 1) {
-      for (let x = Math.floor(faceBox.x); x < Math.ceil(faceBox.x + faceBox.width); x += 1) {
-        const sourceX = Math.round(centerX + (x - centerX) / scale);
-        if (sourceX < 0 || sourceX >= width) continue;
-        const targetIndex = (y * width + x) * 4;
-        const sourceIndex = (y * width + sourceX) * 4;
-        outputPixels.data[targetIndex] = sourcePixels.data[sourceIndex];
-        outputPixels.data[targetIndex + 1] = sourcePixels.data[sourceIndex + 1];
-        outputPixels.data[targetIndex + 2] = sourcePixels.data[sourceIndex + 2];
-        outputPixels.data[targetIndex + 3] = sourcePixels.data[sourceIndex + 3];
-      }
-    }
-
-    resultCanvas = document.createElement("canvas");
-    resultCanvas.width = width;
-    resultCanvas.height = height;
-    resultCanvas.getContext("2d").putImageData(outputPixels, 0, 0);
-  }
-
-  if (settings.lipstickAmount <= 0) return resultCanvas;
-
-  const resultContext = resultCanvas.getContext("2d");
-  const [red, green, blue] = hexToRgb(settings.lipstickColor);
-  const mouthX = faceBox.x + faceBox.width / 2;
-  const mouthY = faceBox.y + faceBox.height * 0.68;
-  const radiusX = Math.max(4, faceBox.width * 0.22);
-  const radiusY = Math.max(2, faceBox.height * 0.07);
-  resultContext.save();
-  resultContext.globalCompositeOperation = "source-atop";
-  resultContext.globalAlpha = settings.lipstickAmount / 100 * 0.72;
-  resultContext.filter = "blur(1.5px)";
-  resultContext.fillStyle = `rgb(${red}, ${green}, ${blue})`;
-  resultContext.beginPath();
-  resultContext.ellipse(mouthX, mouthY, radiusX, radiusY, 0, 0, Math.PI * 2);
-  resultContext.fill();
-  resultContext.restore();
-  return resultCanvas;
-}
-
-function estimateFaceRegion(canvas) {
-  const width = canvas.width;
-  const height = canvas.height;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  const pixels = context.getImageData(0, 0, width, height).data;
-  let minX = width;
-  let minY = height;
-  let maxX = 0;
-  let maxY = 0;
-  let count = 0;
-
-  for (let y = 0; y < height * 0.68; y += 2) {
-    for (let x = width * 0.25; x < width * 0.75; x += 2) {
-      const index = (y * width + x) * 4;
-      if (pixels[index + 3] < 20) continue;
-      if (skinLikelihood(pixels[index], pixels[index + 1], pixels[index + 2]) < 0.38) continue;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-      count += 1;
-    }
-  }
-
-  if (count < 30 || maxX <= minX || maxY <= minY) {
-    return {
-      x: width * 0.32,
-      y: height * 0.08,
-      width: width * 0.36,
-      height: height * 0.42
-    };
-  }
-
-  return {
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY
-  };
+  return adjustedCanvas;
 }
 
 function skinLikelihood(red, green, blue) {
@@ -2344,9 +2209,7 @@ function syncOutput(id) {
     personContrast: formatSigned(input.value),
     personSaturation: formatSigned(input.value),
     personTemperature: formatSigned(input.value),
-    personSharpen: `${input.value}%`,
-    faceSlim: formatSigned(input.value),
-    lipstickAmount: `${input.value}%`
+    personSharpen: `${input.value}%`
   };
 
   const outputIds = {
@@ -2377,9 +2240,7 @@ function syncOutput(id) {
     personContrast: "personContrastValue",
     personSaturation: "personSaturationValue",
     personTemperature: "personTemperatureValue",
-    personSharpen: "personSharpenValue",
-    faceSlim: "faceSlimValue",
-    lipstickAmount: "lipstickAmountValue"
+    personSharpen: "personSharpenValue"
   };
 
   if (outputIds[id]) document.getElementById(outputIds[id]).textContent = valueMap[id];
@@ -2388,8 +2249,7 @@ function syncOutput(id) {
     backgroundColor: "backgroundHex",
     outlineColor: "outlineHex",
     textColor: "textHex",
-    markerColor: "markerHex",
-    lipstickColor: "lipstickHex"
+    markerColor: "markerHex"
   };
   if (hexOutputs[id]) document.getElementById(hexOutputs[id]).textContent = input.value.toUpperCase();
 

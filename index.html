@@ -187,6 +187,7 @@
           <div class="canvas-shell" id="canvasShell">
             <canvas id="coverCanvas" width="1080" height="1440" aria-label="封面实时预览"></canvas>
             <div class="canvas-badge" id="canvasBadge">3:4 · 1080 × 1440</div>
+            <textarea class="canvas-text-editor" id="canvasTextEditor" hidden aria-label="编辑画布文字"></textarea>
           </div>
         </div>
       </div>
@@ -307,12 +308,13 @@
 
       <section class="control-section right-tab-panel" data-right-panel="person">
         <div class="section-title">
-          <h2>人物抠图</h2>
-          <button class="text-button" id="recutButton">
+          <h2>人物调节</h2>
+          <button class="text-button" id="recutButton" title="重新识别主体并覆盖手动修补">
             <i data-lucide="refresh-cw"></i>
             重新抠图
           </button>
         </div>
+        <p class="filter-note recut-hint">重新抠图会重新识别主体、更新边缘并覆盖手动修补。</p>
 
         <div class="field-row">
           <label class="field">
@@ -341,6 +343,25 @@
           <span><span>抠图边缘</span><output id="edgeValue">精确</output></span>
           <input id="edgePrecision" type="range" min="1" max="100" value="82">
         </label>
+
+        <div class="filter-block">
+          <div class="section-title">
+            <h3>手动修补</h3>
+            <button class="icon-button filter-reset" id="resetMatteButton" aria-label="恢复原始抠图" title="恢复原始抠图">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+          </div>
+          <div class="segmented" id="matteTools" aria-label="人物修补工具">
+            <button class="is-active" data-matte-tool="none">浏览</button>
+            <button data-matte-tool="brush" title="涂抹恢复人物">修复画笔</button>
+            <button data-matte-tool="erase" title="擦除多余区域">橡皮擦</button>
+          </div>
+          <label class="slider-field">
+            <span><span>笔刷大小</span><output id="matteBrushSizeValue">48 px</output></span>
+            <input id="matteBrushSize" type="range" min="10" max="180" value="48">
+          </label>
+          <p class="filter-note">在人物区域拖动修补；快捷键 B 修复、E 擦除、V 浏览。</p>
+        </div>
 
         <div class="segmented" id="personPresets" aria-label="人物位置预设">
           <button class="is-active" data-person-preset="right">右侧</button>
@@ -391,6 +412,14 @@
           <label class="slider-field">
             <span><span>美白</span><output id="skinWhiteValue">10%</output></span>
             <input id="skinWhite" type="range" min="0" max="150" value="10">
+          </label>
+          <label class="slider-field">
+            <span><span>高光</span><output id="personHighlightValue">0</output></span>
+            <input id="personHighlight" type="range" min="-50" max="50" value="0">
+          </label>
+          <label class="slider-field">
+            <span><span>阴影</span><output id="personShadowValue">0</output></span>
+            <input id="personShadow" type="range" min="-50" max="50" value="0">
           </label>
           <label class="slider-field">
             <span><span>亮度</span><output id="personBrightnessValue">2</output></span>
@@ -535,6 +564,14 @@
         <label class="slider-field">
           <span><span>饱和度</span><output id="saturationValue">100%</output></span>
           <input id="saturation" type="range" min="0" max="180" value="100">
+        </label>
+        <label class="slider-field">
+          <span><span>高光</span><output id="backgroundHighlightValue">0</output></span>
+          <input id="backgroundHighlight" type="range" min="-50" max="50" value="0">
+        </label>
+        <label class="slider-field">
+          <span><span>阴影</span><output id="backgroundShadowValue">0</output></span>
+          <input id="backgroundShadow" type="range" min="-50" max="50" value="0">
         </label>
         <label class="slider-field">
           <span><span>色温</span><output id="backgroundTemperatureValue">0</output></span>

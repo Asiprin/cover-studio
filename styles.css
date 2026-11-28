@@ -171,6 +171,15 @@ label:focus-within {
   gap: 12px;
 }
 
+.github-link {
+  color: var(--muted-strong);
+  text-decoration: none;
+}
+
+.github-link:hover {
+  color: var(--text);
+}
+
 .save-state {
   gap: 7px;
   color: var(--muted-strong);

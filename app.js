@@ -51,14 +51,22 @@ const state = {
   sceneImage: null,
   personImage: null,
   personCutout: null,
+  personOriginalCutout: null,
   personFiltered: null,
   personBounds: null,
+  personDrawTransform: null,
+  matteTool: "none",
+  matteStroke: null,
   personFilterDirty: true,
   personFilterTimer: null,
   cutoutMode: "等待上传",
   template: "classic",
   layoutLocked: true,
+  personDrag: null,
   sceneDrag: null,
+  titleHitAreas: [],
+  pendingTextClick: null,
+  textEditorOriginal: "",
   zoom: 1,
   renderQueued: false
 };
@@ -89,6 +97,8 @@ const defaults = {
   brightness: "100",
   backgroundContrast: "100",
   saturation: "100",
+  backgroundHighlight: "0",
+  backgroundShadow: "0",
   backgroundTemperature: "0",
   backgroundBlur: "0",
   vignette: "18",
@@ -99,33 +109,34 @@ const defaults = {
   personFilterPreset: "clean",
   skinSmooth: "22",
   skinWhite: "10",
+  personHighlight: "0",
+  personShadow: "0",
   personBrightness: "2",
   personContrast: "5",
   personSaturation: "4",
   personTemperature: "2",
   personSharpen: "18",
-  faceSlim: "0",
-  lipstickAmount: "0",
-  lipstickColor: "#b2384e"
+  matteBrushSize: "48"
 };
 
 const formIds = Object.keys(defaults);
 const PERSON_FILTER_IDS = new Set([
   "skinSmooth",
   "skinWhite",
+  "personHighlight",
+  "personShadow",
   "personBrightness",
   "personContrast",
   "personSaturation",
   "personTemperature",
-  "personSharpen",
-  "faceSlim",
-  "lipstickAmount",
-  "lipstickColor"
+  "personSharpen"
 ]);
 const BACKGROUND_FILTER_IDS = new Set([
   "brightness",
   "backgroundContrast",
   "saturation",
+  "backgroundHighlight",
+  "backgroundShadow",
   "backgroundTemperature",
   "backgroundBlur",
   "vignette"
@@ -175,10 +186,7 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 8,
     personSaturation: 16,
     personTemperature: 28,
-    personSharpen: 24,
-    faceSlim: 4,
-    lipstickAmount: 30,
-    lipstickColor: "#c84b55"
+    personSharpen: 24
   },
   vintage: {
     skinSmooth: 18,
@@ -187,10 +195,7 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 22,
     personSaturation: -22,
     personTemperature: 18,
-    personSharpen: 48,
-    faceSlim: 2,
-    lipstickAmount: 22,
-    lipstickColor: "#9e3840"
+    personSharpen: 48
   },
   punch: {
     skinSmooth: 8,
@@ -199,10 +204,7 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 38,
     personSaturation: 28,
     personTemperature: -5,
-    personSharpen: 72,
-    faceSlim: 8,
-    lipstickAmount: 35,
-    lipstickColor: "#d34254"
+    personSharpen: 72
   },
   soft: {
     skinSmooth: 92,
@@ -211,10 +213,7 @@ const PERSON_FILTER_PRESETS = {
     personContrast: -12,
     personSaturation: -8,
     personTemperature: 10,
-    personSharpen: 0,
-    faceSlim: 5,
-    lipstickAmount: 12,
-    lipstickColor: "#d77a83"
+    personSharpen: 0
   },
   none: {
     skinSmooth: 0,
@@ -475,6 +474,8 @@ function init() {
   bindRightTabs();
   bindCanvasTools();
   bindPhotoGestures();
+  bindCanvasTextEditor();
+  bindMatteTools();
   bindHistoryControls();
   loadSettings();
   applyLayoutLock();
@@ -587,7 +588,7 @@ async function handlePersonFile(file) {
     state.personImage = image;
     await recutPerson();
     scheduleHistoryCommit(120);
-    showToast("人物抠图完成");
+    showToast("人物调节完成");
   } catch (error) {
     console.error(error);
     setPersonStatus("idle", "处理失败，请换一张图片");
@@ -612,9 +613,17 @@ function loadImageFromFile(file) {
 }
 
 async function recutPerson() {
-  if (!state.personImage || segmentationBusy) return;
+  if (!state.personImage) {
+    showToast("请先上传人物图片");
+    return;
+  }
+  if (segmentationBusy) return;
   segmentationBusy = true;
+  const button = $("#recutButton");
+  button.disabled = true;
+  let completed = false;
   setPersonStatus("working", "正在加载 RMBG-1.4 模型...");
+  showToast("正在重新抠图，请稍候");
   await document.fonts.ready.catch(() => {});
 
   try {
@@ -623,6 +632,7 @@ async function recutPerson() {
     state.personBounds = result.bounds;
     state.cutoutMode = "RMBG-1.4";
     setPersonStatus("ready", "RMBG-1.4 抠图完成");
+    completed = true;
   } catch (error) {
     console.warn("RMBG-1.4 is unavailable, trying the fallback model.", error);
     setPersonStatus("working", "RMBG 不可用，正在使用备用模型...");
@@ -632,6 +642,7 @@ async function recutPerson() {
       state.personBounds = result.bounds;
       state.cutoutMode = "MediaPipe";
       setPersonStatus("ready", "已使用备用人物模型");
+      completed = true;
     } catch (fallbackError) {
       console.warn("Fallback segmentation unavailable, using local edge fallback.", fallbackError);
       const result = segmentWithLocalEdge(state.personImage);
@@ -639,14 +650,38 @@ async function recutPerson() {
       state.personBounds = result.bounds;
       state.cutoutMode = "本地边缘";
       setPersonStatus("ready", "已使用本地边缘抠图");
+      completed = true;
     }
   } finally {
     segmentationBusy = false;
+    button.disabled = false;
+    if (completed && state.personCutout) {
+      state.personOriginalCutout = cloneCanvas(state.personCutout);
+      flashCanvasUpdate();
+      showToast("人物调节已更新");
+      scheduleHistoryCommit(120);
+    }
     state.personFiltered = null;
     state.personFilterDirty = true;
     schedulePersonFilter(0);
     queueRender();
   }
+}
+
+function cloneCanvas(sourceCanvas) {
+  const clone = document.createElement("canvas");
+  clone.width = sourceCanvas.width;
+  clone.height = sourceCanvas.height;
+  clone.getContext("2d").drawImage(sourceCanvas, 0, 0);
+  return clone;
+}
+
+function flashCanvasUpdate() {
+  const shell = $("#canvasShell");
+  shell.classList.remove("canvas-updated");
+  void shell.offsetWidth;
+  shell.classList.add("canvas-updated");
+  setTimeout(() => shell.classList.remove("canvas-updated"), 700);
 }
 
 function setPersonStatus(type, text) {
@@ -746,7 +781,7 @@ async function loadRMBGSession() {
     }
 
     const expectedSize = 44403226;
-    const total = Number(response.headers.get("content-length")) || expectedSize;
+    const total = expectedSize;
     const chunks = [];
     let received = 0;
 
@@ -806,8 +841,8 @@ function updateModelProgress(percent, label) {
 }
 
 function formatBytes(bytes) {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  if (bytes >= 1000 * 1000) return `${(bytes / 1000 / 1000).toFixed(1)}MB`;
+  if (bytes >= 1000) return `${(bytes / 1000).toFixed(0)}KB`;
   return `${bytes}B`;
 }
 
@@ -1053,9 +1088,8 @@ function applyPersonFilterPreset(presetName) {
   }
 
   const preset = {
-    faceSlim: 0,
-    lipstickAmount: 0,
-    lipstickColor: "#b2384e",
+    personHighlight: 0,
+    personShadow: 0,
     ...(PERSON_FILTER_PRESETS[presetName] || PERSON_FILTER_PRESETS.clean)
   };
   $("#personFilterPreset").value = presetName;
@@ -1120,7 +1154,11 @@ function applyBackgroundFilterPreset(presetName) {
     return;
   }
 
-  const preset = BACKGROUND_FILTER_PRESETS[presetName] || BACKGROUND_FILTER_PRESETS.clean;
+  const preset = {
+    backgroundHighlight: 0,
+    backgroundShadow: 0,
+    ...(BACKGROUND_FILTER_PRESETS[presetName] || BACKGROUND_FILTER_PRESETS.clean)
+  };
   $("#backgroundFilterPreset").value = presetName;
   Object.entries(preset).forEach(([id, value]) => {
     document.getElementById(id).value = String(value);
@@ -1170,8 +1208,49 @@ function bindPhotoGestures() {
   };
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (!state.sceneImage) return;
     const point = rectForEvent(event);
+    if (state.matteTool !== "none" && state.personCutout && state.personDrawTransform) {
+      const transform = state.personDrawTransform;
+      const insidePerson = point.x >= transform.left && point.x <= transform.left + transform.width &&
+        point.y >= transform.top && point.y <= transform.top + transform.height;
+      if (insidePerson) {
+        canvas.setPointerCapture(event.pointerId);
+        state.matteStroke = {
+          pointerId: event.pointerId,
+          tool: state.matteTool,
+          transform,
+          bounds: transform.bounds,
+          radius: Number($("#matteBrushSize").value) / 2 * transform.bounds.width / transform.width,
+          last: mapPointToPersonSource(point, transform, transform.bounds)
+        };
+        applyMattePoint(state.matteStroke, state.matteStroke.last);
+        return;
+      }
+    }
+    const textHit = findTitleHit(point);
+    if (textHit && state.matteTool === "none") {
+      state.pendingTextClick = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        hit: textHit
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (state.matteTool === "none" && isPointInsidePerson(point)) {
+      canvas.setPointerCapture(event.pointerId);
+      state.personDrag = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        personX: Number($("#personX").value),
+        personY: Number($("#personY").value)
+      };
+      canvas.style.cursor = "grabbing";
+      return;
+    }
+    if (!state.sceneImage) return;
     const media = getMediaRect(RATIOS[state.activeRatio]);
     const inside = point.x >= media.x && point.x <= media.x + media.width && point.y >= media.y && point.y <= media.y + media.height;
     if (!inside) return;
@@ -1187,18 +1266,68 @@ function bindPhotoGestures() {
   });
 
   canvas.addEventListener("pointermove", (event) => {
+    if (state.matteStroke && state.matteStroke.pointerId === event.pointerId) {
+      const point = rectForEvent(event);
+      continueMatteStroke(state.matteStroke, point);
+      return;
+    }
+    if (state.personDrag && state.personDrag.pointerId === event.pointerId) {
+      const rect = canvas.getBoundingClientRect();
+      const deltaX = (event.clientX - state.personDrag.clientX) / rect.width * 100;
+      const deltaY = (event.clientY - state.personDrag.clientY) / rect.height * 100;
+      const personX = $("#personX");
+      const personY = $("#personY");
+      personX.value = String(Math.round(clamp(state.personDrag.personX + deltaX, Number(personX.min), Number(personX.max))));
+      personY.value = String(Math.round(clamp(state.personDrag.personY + deltaY, Number(personY.min), Number(personY.max))));
+      syncOutput("personX");
+      syncOutput("personY");
+      queueRender();
+      return;
+    }
     if (!state.sceneDrag || state.sceneDrag.pointerId !== event.pointerId) return;
     const rect = canvas.getBoundingClientRect();
-    const deltaX = (event.clientX - state.sceneDrag.clientX) / rect.width * 200;
-    const deltaY = (event.clientY - state.sceneDrag.clientY) / rect.height * 200;
-    $("#sceneX").value = String(clamp(state.sceneDrag.sceneX + deltaX, -100, 100));
-    $("#sceneY").value = String(clamp(state.sceneDrag.sceneY + deltaY, -100, 100));
+    const media = getMediaRect(RATIOS[state.activeRatio]);
+    const crop = getSceneCrop(state.sceneImage, media.width, media.height);
+    const deltaCanvasX = (event.clientX - state.sceneDrag.clientX) / rect.width * canvas.width;
+    const deltaCanvasY = (event.clientY - state.sceneDrag.clientY) / rect.height * canvas.height;
+    const deltaSceneX = crop.rangeX > 0
+      ? deltaCanvasX * (crop.sourceWidth / media.width) / crop.rangeX * 100
+      : 0;
+    const deltaSceneY = crop.rangeY > 0
+      ? deltaCanvasY * (crop.sourceHeight / media.height) / crop.rangeY * 100
+      : 0;
+    $("#sceneX").value = String(Math.round(clamp(state.sceneDrag.sceneX + deltaSceneX, -100, 100)));
+    $("#sceneY").value = String(Math.round(clamp(state.sceneDrag.sceneY + deltaSceneY, -100, 100)));
     syncOutput("sceneX");
     syncOutput("sceneY");
     queueRender();
   });
 
   const endDrag = (event) => {
+    if (state.matteStroke && state.matteStroke.pointerId === event.pointerId) {
+      state.matteStroke = null;
+      state.personBounds = findAlphaBounds(state.personCutout);
+      state.personFiltered = null;
+      state.personFilterDirty = true;
+      schedulePersonFilter(60);
+      queueRender();
+      scheduleHistoryCommit(100);
+      return;
+    }
+    if (state.pendingTextClick && state.pendingTextClick.pointerId === event.pointerId) {
+      const moved = Math.hypot(event.clientX - state.pendingTextClick.clientX, event.clientY - state.pendingTextClick.clientY);
+      const hit = state.pendingTextClick.hit;
+      state.pendingTextClick = null;
+      if (moved < 8) openCanvasTextEditor(hit);
+      return;
+    }
+    if (state.personDrag && state.personDrag.pointerId === event.pointerId) {
+      state.personDrag = null;
+      canvas.style.cursor = "grab";
+      saveSettings();
+      scheduleHistoryCommit(100);
+      return;
+    }
     if (!state.sceneDrag || state.sceneDrag.pointerId !== event.pointerId) return;
     state.sceneDrag = null;
     canvas.style.cursor = "grab";
@@ -1208,8 +1337,19 @@ function bindPhotoGestures() {
   canvas.addEventListener("pointercancel", endDrag);
 
   canvas.addEventListener("wheel", (event) => {
-    if (!state.sceneImage) return;
     const point = rectForEvent(event);
+    if (state.matteTool === "none" && isPointInsidePerson(point)) {
+      event.preventDefault();
+      const personScale = $("#personScale");
+      const nextScale = clamp(Number(personScale.value) - event.deltaY * 0.06, Number(personScale.min), Number(personScale.max));
+      personScale.value = String(Math.round(nextScale));
+      syncOutput("personScale");
+      queueRender();
+      saveSettings();
+      scheduleHistoryCommit(120);
+      return;
+    }
+    if (!state.sceneImage) return;
     const media = getMediaRect(RATIOS[state.activeRatio]);
     const inside = point.x >= media.x && point.x <= media.x + media.width && point.y >= media.y && point.y <= media.y + media.height;
     if (!inside) return;
@@ -1220,6 +1360,114 @@ function bindPhotoGestures() {
     queueRender();
     saveSettings();
   }, { passive: false });
+}
+
+function isPointInsidePerson(point) {
+  const transform = state.personDrawTransform;
+  return Boolean(state.personCutout && transform) &&
+    point.x >= transform.left && point.x <= transform.left + transform.width &&
+    point.y >= transform.top && point.y <= transform.top + transform.height;
+}
+
+function mapPointToPersonSource(point, transform, bounds) {
+  return {
+    x: bounds.x + (point.x - transform.left) / transform.width * bounds.width,
+    y: bounds.y + (point.y - transform.top) / transform.height * bounds.height
+  };
+}
+
+function continueMatteStroke(stroke, point) {
+  const sourcePoint = mapPointToPersonSource(point, stroke.transform, stroke.bounds);
+  const distance = Math.hypot(sourcePoint.x - stroke.last.x, sourcePoint.y - stroke.last.y);
+  const steps = Math.max(1, Math.ceil(distance / Math.max(2, stroke.radius * 0.38)));
+  for (let index = 1; index <= steps; index += 1) {
+    const x = stroke.last.x + (sourcePoint.x - stroke.last.x) * index / steps;
+    const y = stroke.last.y + (sourcePoint.y - stroke.last.y) * index / steps;
+    applyMattePoint(stroke, { x, y });
+  }
+  stroke.last = sourcePoint;
+  state.personFiltered = null;
+  queueRender();
+}
+
+function applyMattePoint(stroke, point) {
+  const context = state.personCutout.getContext("2d");
+  const radius = Math.max(2, stroke.radius);
+  context.save();
+  context.beginPath();
+  context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  if (stroke.tool === "brush") {
+    context.clip();
+    context.drawImage(state.personOriginalCutout, 0, 0);
+  } else {
+    context.clip();
+    context.globalCompositeOperation = "destination-out";
+    context.fill();
+  }
+  context.restore();
+}
+
+function findTitleHit(point) {
+  return state.titleHitAreas.find((area) => (
+    point.x >= area.x - 8 &&
+    point.x <= area.x + area.width + 8 &&
+    point.y >= area.y - 8 &&
+    point.y <= area.y + area.height + 8
+  ));
+}
+
+function bindCanvasTextEditor() {
+  const editor = $("#canvasTextEditor");
+  editor.addEventListener("input", () => {
+    const inputId = editor.dataset.inputId;
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.value = editor.value;
+    syncOutput(inputId);
+    queueRender();
+    saveSettings();
+  });
+  editor.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      editor.value = state.textEditorOriginal;
+      const input = document.getElementById(editor.dataset.inputId);
+      if (input) input.value = state.textEditorOriginal;
+      editor.blur();
+    } else if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      editor.blur();
+    }
+  });
+  editor.addEventListener("blur", () => {
+    editor.hidden = true;
+    queueRender();
+    scheduleHistoryCommit(80);
+  });
+}
+
+function openCanvasTextEditor(hit) {
+  const editor = $("#canvasTextEditor");
+  const input = document.getElementById(hit.inputId);
+  const canvasRect = canvas.getBoundingClientRect();
+  const shellRect = $("#canvasShell").getBoundingClientRect();
+  const scaleX = canvasRect.width / canvas.width;
+  const scaleY = canvasRect.height / canvas.height;
+  editor.dataset.inputId = hit.inputId;
+  editor.value = input.value;
+  state.textEditorOriginal = input.value;
+  editor.hidden = false;
+  editor.style.left = `${canvasRect.left - shellRect.left + hit.x * scaleX - 4}px`;
+  editor.style.top = `${canvasRect.top - shellRect.top + hit.y * scaleY - 5}px`;
+  editor.style.width = `${Math.max(140, hit.width * scaleX + 12)}px`;
+  editor.style.height = `${Math.max(48, hit.height * scaleY + 10)}px`;
+  editor.style.fontFamily = `"${$("#fontFamily").value}", serif`;
+  editor.style.fontWeight = $("#fontWeight").value;
+  editor.style.fontSize = `${Math.max(16, hit.height * scaleY * 0.72)}px`;
+  editor.style.color = hit.inputId === "line2Input"
+    ? (TEMPLATE_STYLES[state.template]?.markerTextColor || $("#textColor").value)
+    : $("#textColor").value;
+  editor.focus();
+  editor.select();
 }
 
 function clamp(value, min, max) {
@@ -1259,6 +1507,43 @@ function bindHistoryControls() {
   $("#redoButton").addEventListener("click", redoHistory);
 }
 
+function bindMatteTools() {
+  $$("#matteTools button").forEach((button) => {
+    button.addEventListener("click", () => setMatteTool(button.dataset.matteTool));
+  });
+  $("#resetMatteButton").addEventListener("click", resetMatte);
+  document.addEventListener("keydown", (event) => {
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (event.key.toLowerCase() === "b") setMatteTool("brush");
+    if (event.key.toLowerCase() === "e") setMatteTool("erase");
+    if (event.key.toLowerCase() === "v") setMatteTool("none");
+  });
+}
+
+function setMatteTool(tool) {
+  state.matteTool = tool;
+  $$("#matteTools button").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.matteTool === tool);
+  });
+  canvas.style.cursor = tool === "none" ? "grab" : "crosshair";
+}
+
+function resetMatte() {
+  if (!state.personOriginalCutout) {
+    showToast("请先上传并抠出人物");
+    return;
+  }
+  state.personCutout = cloneCanvas(state.personOriginalCutout);
+  state.personBounds = findAlphaBounds(state.personCutout);
+  state.personFiltered = null;
+  state.personFilterDirty = true;
+  schedulePersonFilter(0);
+  queueRender();
+  scheduleHistoryCommit(80);
+  showToast("已恢复原始人物抠图");
+}
+
 function scheduleHistoryCommit(delay = 120) {
   if (restoringHistory) return;
   clearTimeout(historyTimer);
@@ -1285,6 +1570,7 @@ function createHistorySnapshot() {
     sceneImage: state.sceneImage,
     personImage: state.personImage,
     personCutout: state.personCutout,
+    personOriginalCutout: state.personOriginalCutout,
     personFiltered: state.personFiltered,
     personBounds: state.personBounds,
     cutoutMode: state.cutoutMode
@@ -1301,6 +1587,7 @@ function snapshotSignature(snapshot) {
     sceneImage: getAssetId(snapshot.sceneImage),
     personImage: getAssetId(snapshot.personImage),
     personCutout: getAssetId(snapshot.personCutout),
+    personOriginalCutout: getAssetId(snapshot.personOriginalCutout),
     personFiltered: getAssetId(snapshot.personFiltered)
   });
 }
@@ -1328,6 +1615,7 @@ function restoreHistorySnapshot(snapshot) {
   state.sceneImage = snapshot.sceneImage;
   state.personImage = snapshot.personImage;
   state.personCutout = snapshot.personCutout;
+  state.personOriginalCutout = snapshot.personOriginalCutout;
   state.personFiltered = snapshot.personFiltered;
   state.personBounds = snapshot.personBounds;
   state.cutoutMode = snapshot.cutoutMode;
@@ -1471,19 +1759,10 @@ function drawTemplateMetadata(ctx, width, height) {
   const family = templateStyle.family || "classic";
   if (family === "classic") return;
 
-  const isDark = family === "midnight";
   const accent = templateStyle.markerColor;
-  const ink = isDark ? "#ece2cf" : "#262522";
   const margin = width * 0.055;
 
   ctx.save();
-  ctx.fillStyle = ink;
-  ctx.globalAlpha = isDark ? 0.82 : 0.62;
-  ctx.font = `600 ${Math.max(13, width * 0.012)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  ctx.fillText(family === "swiss" ? "COVER / 01" : "ISSUE 01 · COVER", margin, height * 0.042);
-
   ctx.fillStyle = accent;
   ctx.globalAlpha = 0.92;
   if (family === "swiss") {
@@ -1492,10 +1771,6 @@ function drawTemplateMetadata(ctx, width, height) {
   } else {
     ctx.fillRect(margin, height * 0.078, Math.max(3, width * 0.003), height * 0.105);
     ctx.fillRect(margin, height * 0.915, width * 0.89, Math.max(1, width * 0.0014));
-    ctx.globalAlpha = isDark ? 0.62 : 0.48;
-    ctx.fillStyle = ink;
-    ctx.font = `500 ${Math.max(11, width * 0.009)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    ctx.fillText("COVER STORY · VISUAL NOTE", margin, height * 0.932);
   }
   ctx.restore();
 }
@@ -1543,7 +1818,28 @@ function drawMedia(ctx, ratio) {
 
   ctx.filter = "none";
   drawTemperature(ctx, x, y, width, height);
+  drawHighlightShadow(ctx, x, y, width, height);
   drawVignette(ctx, x, y, width, height);
+  ctx.restore();
+}
+
+function drawHighlightShadow(ctx, x, y, width, height) {
+  const highlight = Number($("#backgroundHighlight").value);
+  const shadow = Number($("#backgroundShadow").value);
+
+  ctx.save();
+  if (highlight !== 0) {
+    ctx.globalCompositeOperation = highlight > 0 ? "soft-light" : "multiply";
+    ctx.globalAlpha = Math.abs(highlight) / 50 * 0.22;
+    ctx.fillStyle = highlight > 0 ? "#ffffff" : "#242424";
+    ctx.fillRect(x, y, width, height);
+  }
+  if (shadow !== 0) {
+    ctx.globalCompositeOperation = shadow > 0 ? "screen" : "multiply";
+    ctx.globalAlpha = Math.abs(shadow) / 50 * 0.12;
+    ctx.fillStyle = shadow > 0 ? "#ffffff" : "#111111";
+    ctx.fillRect(x, y, width, height);
+  }
   ctx.restore();
 }
 
@@ -1589,32 +1885,44 @@ function getMediaRect(ratio) {
   };
 }
 
-function drawImageCover(ctx, image, x, y, width, height) {
+function getSceneCrop(image, width, height) {
   const imageRatio = image.naturalWidth / image.naturalHeight;
   const targetRatio = width / height;
-  let sourceX = 0;
-  let sourceY = 0;
-  let sourceWidth = image.naturalWidth;
-  let sourceHeight = image.naturalHeight;
+  let baseWidth = image.naturalWidth;
+  let baseHeight = image.naturalHeight;
 
   if (imageRatio > targetRatio) {
-    sourceWidth = image.naturalHeight * targetRatio;
-    sourceX = (image.naturalWidth - sourceWidth) / 2;
+    baseWidth = image.naturalHeight * targetRatio;
   } else {
-    sourceHeight = image.naturalWidth / targetRatio;
-    sourceY = (image.naturalHeight - sourceHeight) / 2;
+    baseHeight = image.naturalWidth / targetRatio;
   }
 
-  const scale = Number($("#sceneScale").value) / 100;
-  const drawWidth = width * scale;
-  const drawHeight = height * scale;
-  const maxOffsetX = Math.max(0, (drawWidth - width) / 2);
-  const maxOffsetY = Math.max(0, (drawHeight - height) / 2);
-  const offsetX = Number($("#sceneX").value) / 100 * maxOffsetX;
-  const offsetY = Number($("#sceneY").value) / 100 * maxOffsetY;
-  const drawX = x + (width - drawWidth) / 2 + offsetX;
-  const drawY = y + (height - drawHeight) / 2 + offsetY;
-  ctx.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, drawX, drawY, drawWidth, drawHeight);
+  const zoom = clamp(Number($("#sceneScale").value) / 100, 1, 2.2);
+  const sourceWidth = Math.min(image.naturalWidth, baseWidth / zoom);
+  const sourceHeight = Math.min(image.naturalHeight, baseHeight / zoom);
+  const rangeX = Math.max(0, (image.naturalWidth - sourceWidth) / 2);
+  const rangeY = Math.max(0, (image.naturalHeight - sourceHeight) / 2);
+  const sceneX = Number($("#sceneX").value);
+  const sceneY = Number($("#sceneY").value);
+  const sourceX = clamp(rangeX - sceneX / 100 * rangeX, 0, image.naturalWidth - sourceWidth);
+  const sourceY = clamp(rangeY - sceneY / 100 * rangeY, 0, image.naturalHeight - sourceHeight);
+
+  return { sourceX, sourceY, sourceWidth, sourceHeight, rangeX, rangeY };
+}
+
+function drawImageCover(ctx, image, x, y, width, height) {
+  const crop = getSceneCrop(image, width, height);
+  ctx.drawImage(
+    image,
+    crop.sourceX,
+    crop.sourceY,
+    crop.sourceWidth,
+    crop.sourceHeight,
+    x,
+    y,
+    width,
+    height
+  );
 }
 
 function drawTitle(ctx, ratio) {
@@ -1650,6 +1958,24 @@ function drawTitle(ctx, ratio) {
   titleY = Math.max(height * 0.035, Math.min(titleY, mediaTop - totalHeight - mediaGap));
   const firstX = centered ? width / 2 : width * (1 - layout.titleWidth) / 2;
   const secondX = centered ? width / 2 : firstX;
+  const firstWidth = measureTextWidth(ctx, line1, fontFamily, fontWeight, firstSize);
+  const secondWidth = line2 ? measureTextWidth(ctx, line2, fontFamily, fontWeight, secondSize) : 0;
+  state.titleHitAreas = [{
+    inputId: "line1Input",
+    x: centered ? firstX - firstWidth / 2 : firstX,
+    y: titleY,
+    width: firstWidth,
+    height: firstSize * 1.08
+  }];
+  if (line2) {
+    state.titleHitAreas.push({
+      inputId: "line2Input",
+      x: centered ? secondX - secondWidth / 2 : secondX,
+      y: titleY + firstSize + gap,
+      width: secondWidth,
+      height: secondSize * 1.08
+    });
+  }
 
   if (line2) {
     drawMarker(
@@ -2040,16 +2366,15 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
   const settings = {
     smooth: Number($("#skinSmooth").value),
     white: Number($("#skinWhite").value),
+    highlight: Number($("#personHighlight").value),
+    shadow: Number($("#personShadow").value),
     brightness: Number($("#personBrightness").value),
     contrast: Number($("#personContrast").value),
     saturation: Number($("#personSaturation").value),
     temperature: Number($("#personTemperature").value),
-    sharpen: Number($("#personSharpen").value),
-    faceSlim: Number($("#faceSlim").value),
-    lipstickAmount: Number($("#lipstickAmount").value),
-    lipstickColor: $("#lipstickColor").value
+    sharpen: Number($("#personSharpen").value)
   };
-  const unchanged = ["smooth", "white", "brightness", "contrast", "saturation", "temperature", "sharpen", "faceSlim", "lipstickAmount"]
+  const unchanged = ["smooth", "white", "highlight", "shadow", "brightness", "contrast", "saturation", "temperature", "sharpen"]
     .every((key) => settings[key] === 0);
   if (unchanged) return sourceCanvas;
 
@@ -2098,6 +2423,14 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
     green += lift + settings.temperature * 0.08;
     blue += lift - settings.temperature * 0.34;
 
+    const currentLuminance = red * 0.3 + green * 0.59 + blue * 0.11;
+    const highlightMask = smoothstep(145, 255, currentLuminance);
+    const shadowMask = 1 - smoothstep(20, 115, currentLuminance);
+    const toneLift = settings.highlight * 1.15 * highlightMask + settings.shadow * 1.15 * shadowMask;
+    red += toneLift;
+    green += toneLift;
+    blue += toneLift;
+
     red = (red - 128) * contrastFactor + 128;
     green = (green - 128) * contrastFactor + 128;
     blue = (blue - 128) * contrastFactor + 128;
@@ -2135,103 +2468,7 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
     adjustedContext.putImageData(sharpened, 0, 0);
   }
 
-  return applyFaceReshapeAndLipstick(adjustedCanvas, settings);
-}
-
-function applyFaceReshapeAndLipstick(sourceCanvas, settings) {
-  if (settings.faceSlim === 0 && settings.lipstickAmount === 0) return sourceCanvas;
-  const width = sourceCanvas.width;
-  const height = sourceCanvas.height;
-  const faceBox = estimateFaceRegion(sourceCanvas);
-  let resultCanvas = sourceCanvas;
-
-  if (settings.faceSlim !== 0) {
-    const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
-    const sourcePixels = sourceContext.getImageData(0, 0, width, height);
-    const outputPixels = new ImageData(new Uint8ClampedArray(sourcePixels.data), width, height);
-    const scale = settings.faceSlim >= 0
-      ? 1 - settings.faceSlim / 50 * 0.2
-      : 1 + Math.abs(settings.faceSlim) / 50 * 0.16;
-    const centerX = faceBox.x + faceBox.width / 2;
-
-    for (let y = Math.floor(faceBox.y); y < Math.ceil(faceBox.y + faceBox.height); y += 1) {
-      for (let x = Math.floor(faceBox.x); x < Math.ceil(faceBox.x + faceBox.width); x += 1) {
-        const sourceX = Math.round(centerX + (x - centerX) / scale);
-        if (sourceX < 0 || sourceX >= width) continue;
-        const targetIndex = (y * width + x) * 4;
-        const sourceIndex = (y * width + sourceX) * 4;
-        outputPixels.data[targetIndex] = sourcePixels.data[sourceIndex];
-        outputPixels.data[targetIndex + 1] = sourcePixels.data[sourceIndex + 1];
-        outputPixels.data[targetIndex + 2] = sourcePixels.data[sourceIndex + 2];
-        outputPixels.data[targetIndex + 3] = sourcePixels.data[sourceIndex + 3];
-      }
-    }
-
-    resultCanvas = document.createElement("canvas");
-    resultCanvas.width = width;
-    resultCanvas.height = height;
-    resultCanvas.getContext("2d").putImageData(outputPixels, 0, 0);
-  }
-
-  if (settings.lipstickAmount <= 0) return resultCanvas;
-
-  const resultContext = resultCanvas.getContext("2d");
-  const [red, green, blue] = hexToRgb(settings.lipstickColor);
-  const mouthX = faceBox.x + faceBox.width / 2;
-  const mouthY = faceBox.y + faceBox.height * 0.68;
-  const radiusX = Math.max(4, faceBox.width * 0.22);
-  const radiusY = Math.max(2, faceBox.height * 0.07);
-  resultContext.save();
-  resultContext.globalCompositeOperation = "source-atop";
-  resultContext.globalAlpha = settings.lipstickAmount / 100 * 0.72;
-  resultContext.filter = "blur(1.5px)";
-  resultContext.fillStyle = `rgb(${red}, ${green}, ${blue})`;
-  resultContext.beginPath();
-  resultContext.ellipse(mouthX, mouthY, radiusX, radiusY, 0, 0, Math.PI * 2);
-  resultContext.fill();
-  resultContext.restore();
-  return resultCanvas;
-}
-
-function estimateFaceRegion(canvas) {
-  const width = canvas.width;
-  const height = canvas.height;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  const pixels = context.getImageData(0, 0, width, height).data;
-  let minX = width;
-  let minY = height;
-  let maxX = 0;
-  let maxY = 0;
-  let count = 0;
-
-  for (let y = 0; y < height * 0.68; y += 2) {
-    for (let x = width * 0.25; x < width * 0.75; x += 2) {
-      const index = (y * width + x) * 4;
-      if (pixels[index + 3] < 20) continue;
-      if (skinLikelihood(pixels[index], pixels[index + 1], pixels[index + 2]) < 0.38) continue;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-      count += 1;
-    }
-  }
-
-  if (count < 30 || maxX <= minX || maxY <= minY) {
-    return {
-      x: width * 0.32,
-      y: height * 0.08,
-      width: width * 0.36,
-      height: height * 0.42
-    };
-  }
-
-  return {
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY
-  };
+  return adjustedCanvas;
 }
 
 function skinLikelihood(red, green, blue) {
@@ -2268,6 +2505,13 @@ function drawPerson(ctx, ratio) {
   const filteredSource = state.personFiltered || source;
   const drawX = -targetWidth / 2;
   const drawY = -targetHeight;
+  state.personDrawTransform = {
+    left: x + drawX,
+    top: y + drawY,
+    width: targetWidth,
+    height: targetHeight,
+    bounds
+  };
 
   ctx.save();
   ctx.translate(x, y);
@@ -2329,24 +2573,27 @@ function syncOutput(id) {
     brushY: `${input.value} px`,
     mediaHeight: `${input.value}%`,
     mediaY: `${input.value}%`,
-    brightness: `${input.value}%`,
-    backgroundContrast: `${input.value}%`,
-    saturation: `${input.value}%`,
+    brightness: `${cappedPercent(input.value)}%`,
+    backgroundContrast: `${cappedPercent(input.value)}%`,
+    saturation: `${cappedPercent(input.value)}%`,
+    backgroundHighlight: formatSigned(input.value),
+    backgroundShadow: formatSigned(input.value),
     backgroundTemperature: formatSigned(input.value),
-    backgroundBlur: `${input.value}%`,
-    vignette: `${input.value}%`,
+    backgroundBlur: `${cappedPercent(input.value)}%`,
+    vignette: `${cappedPercent(input.value)}%`,
     sceneScale: `${input.value}%`,
     sceneX: formatSigned(input.value),
     sceneY: formatSigned(input.value),
     skinSmooth: `${input.value}%`,
     skinWhite: `${input.value}%`,
+    personHighlight: formatSigned(input.value),
+    personShadow: formatSigned(input.value),
     personBrightness: formatSigned(input.value),
     personContrast: formatSigned(input.value),
     personSaturation: formatSigned(input.value),
     personTemperature: formatSigned(input.value),
     personSharpen: `${input.value}%`,
-    faceSlim: formatSigned(input.value),
-    lipstickAmount: `${input.value}%`
+    matteBrushSize: `${input.value} px`
   };
 
   const outputIds = {
@@ -2365,6 +2612,8 @@ function syncOutput(id) {
     brightness: "brightnessValue",
     backgroundContrast: "backgroundContrastValue",
     saturation: "saturationValue",
+    backgroundHighlight: "backgroundHighlightValue",
+    backgroundShadow: "backgroundShadowValue",
     backgroundTemperature: "backgroundTemperatureValue",
     backgroundBlur: "backgroundBlurValue",
     vignette: "vignetteValue",
@@ -2373,13 +2622,14 @@ function syncOutput(id) {
     sceneY: "sceneYValue",
     skinSmooth: "skinSmoothValue",
     skinWhite: "skinWhiteValue",
+    personHighlight: "personHighlightValue",
+    personShadow: "personShadowValue",
     personBrightness: "personBrightnessValue",
     personContrast: "personContrastValue",
     personSaturation: "personSaturationValue",
     personTemperature: "personTemperatureValue",
     personSharpen: "personSharpenValue",
-    faceSlim: "faceSlimValue",
-    lipstickAmount: "lipstickAmountValue"
+    matteBrushSize: "matteBrushSizeValue"
   };
 
   if (outputIds[id]) document.getElementById(outputIds[id]).textContent = valueMap[id];
@@ -2388,8 +2638,7 @@ function syncOutput(id) {
     backgroundColor: "backgroundHex",
     outlineColor: "outlineHex",
     textColor: "textHex",
-    markerColor: "markerHex",
-    lipstickColor: "lipstickHex"
+    markerColor: "markerHex"
   };
   if (hexOutputs[id]) document.getElementById(hexOutputs[id]).textContent = input.value.toUpperCase();
 
@@ -2402,6 +2651,10 @@ function syncOutput(id) {
 function formatSigned(value) {
   const number = Number(value);
   return number > 0 ? `+${number}` : String(number);
+}
+
+function cappedPercent(value) {
+  return Math.min(100, Number(value));
 }
 
 function syncAllOutputs() {
@@ -2454,8 +2707,10 @@ function resetSettings() {
   state.sceneImage = null;
   state.personImage = null;
   state.personCutout = null;
+  state.personOriginalCutout = null;
   state.personFiltered = null;
   state.personBounds = null;
+  setMatteTool("none");
   $("#sceneFileName").textContent = "点击或拖入图片";
   $("#personFileName").textContent = "自动识别并抠出人物";
   setPersonStatus("idle", "上传人物后自动抠图");

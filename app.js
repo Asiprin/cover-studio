@@ -1151,6 +1151,12 @@ function bindRightTabs() {
   });
 }
 
+function activateRightTab(tabName) {
+  const button = $(`.right-tab[data-right-tab="${tabName}"]`);
+  if (!button || button.classList.contains("is-active")) return;
+  button.click();
+}
+
 function applyBackgroundFilterPreset(presetName) {
   if (presetName === "custom") {
     saveSettings();
@@ -1202,6 +1208,13 @@ function applyLayoutLock() {
 function setSelectionTarget(target) {
   state.selectedTarget = target;
   updateSelectionOverlay();
+  const tabByTarget = {
+    person: "person",
+    scene: "background",
+    line1: "title",
+    line2: "title"
+  };
+  if (tabByTarget[target]) activateRightTab(tabByTarget[target]);
 }
 
 function getSelectionBounds(target = state.selectedTarget) {

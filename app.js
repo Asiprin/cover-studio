@@ -51,23 +51,14 @@ const state = {
   sceneImage: null,
   personImage: null,
   personCutout: null,
-  personOriginalCutout: null,
-  personAdjustedCutout: null,
-  personMatteMask: null,
   personFiltered: null,
   personBounds: null,
-  personDrawTransform: null,
-  matteTool: "none",
-  matteStroke: null,
   personFilterDirty: true,
   personFilterTimer: null,
   cutoutMode: "等待上传",
   template: "classic",
   layoutLocked: true,
   sceneDrag: null,
-  titleHitAreas: [],
-  pendingTextClick: null,
-  textEditorOriginal: "",
   zoom: 1,
   renderQueued: false
 };
@@ -98,8 +89,6 @@ const defaults = {
   brightness: "100",
   backgroundContrast: "100",
   saturation: "100",
-  backgroundHighlight: "0",
-  backgroundShadow: "0",
   backgroundTemperature: "0",
   backgroundBlur: "0",
   vignette: "18",
@@ -110,34 +99,33 @@ const defaults = {
   personFilterPreset: "clean",
   skinSmooth: "22",
   skinWhite: "10",
-  personHighlight: "0",
-  personShadow: "0",
   personBrightness: "2",
   personContrast: "5",
   personSaturation: "4",
   personTemperature: "2",
   personSharpen: "18",
-  matteBrushSize: "48"
+  faceSlim: "0",
+  lipstickAmount: "0",
+  lipstickColor: "#b2384e"
 };
 
 const formIds = Object.keys(defaults);
 const PERSON_FILTER_IDS = new Set([
   "skinSmooth",
   "skinWhite",
-  "personHighlight",
-  "personShadow",
   "personBrightness",
   "personContrast",
   "personSaturation",
   "personTemperature",
-  "personSharpen"
+  "personSharpen",
+  "faceSlim",
+  "lipstickAmount",
+  "lipstickColor"
 ]);
 const BACKGROUND_FILTER_IDS = new Set([
   "brightness",
   "backgroundContrast",
   "saturation",
-  "backgroundHighlight",
-  "backgroundShadow",
   "backgroundTemperature",
   "backgroundBlur",
   "vignette"
@@ -187,7 +175,10 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 8,
     personSaturation: 16,
     personTemperature: 28,
-    personSharpen: 24
+    personSharpen: 24,
+    faceSlim: 4,
+    lipstickAmount: 30,
+    lipstickColor: "#c84b55"
   },
   vintage: {
     skinSmooth: 18,
@@ -196,7 +187,10 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 22,
     personSaturation: -22,
     personTemperature: 18,
-    personSharpen: 48
+    personSharpen: 48,
+    faceSlim: 2,
+    lipstickAmount: 22,
+    lipstickColor: "#9e3840"
   },
   punch: {
     skinSmooth: 8,
@@ -205,7 +199,10 @@ const PERSON_FILTER_PRESETS = {
     personContrast: 38,
     personSaturation: 28,
     personTemperature: -5,
-    personSharpen: 72
+    personSharpen: 72,
+    faceSlim: 8,
+    lipstickAmount: 35,
+    lipstickColor: "#d34254"
   },
   soft: {
     skinSmooth: 92,
@@ -214,7 +211,10 @@ const PERSON_FILTER_PRESETS = {
     personContrast: -12,
     personSaturation: -8,
     personTemperature: 10,
-    personSharpen: 0
+    personSharpen: 0,
+    faceSlim: 5,
+    lipstickAmount: 12,
+    lipstickColor: "#d77a83"
   },
   none: {
     skinSmooth: 0,
@@ -475,8 +475,6 @@ function init() {
   bindRightTabs();
   bindCanvasTools();
   bindPhotoGestures();
-  bindCanvasTextEditor();
-  bindMatteTools();
   bindHistoryControls();
   loadSettings();
   applyLayoutLock();
@@ -589,7 +587,7 @@ async function handlePersonFile(file) {
     state.personImage = image;
     await recutPerson();
     scheduleHistoryCommit(120);
-    showToast("人物调节完成");
+    showToast("人物抠图完成");
   } catch (error) {
     console.error(error);
     setPersonStatus("idle", "处理失败，请换一张图片");
@@ -614,17 +612,9 @@ function loadImageFromFile(file) {
 }
 
 async function recutPerson() {
-  if (!state.personImage) {
-    showToast("请先上传人物图片");
-    return;
-  }
-  if (segmentationBusy) return;
+  if (!state.personImage || segmentationBusy) return;
   segmentationBusy = true;
-  const button = $("#recutButton");
-  button.disabled = true;
-  let completed = false;
   setPersonStatus("working", "正在加载 RMBG-1.4 模型...");
-  showToast("正在重新抠图，请稍候");
   await document.fonts.ready.catch(() => {});
 
   try {
@@ -633,7 +623,6 @@ async function recutPerson() {
     state.personBounds = result.bounds;
     state.cutoutMode = "RMBG-1.4";
     setPersonStatus("ready", "RMBG-1.4 抠图完成");
-    completed = true;
   } catch (error) {
     console.warn("RMBG-1.4 is unavailable, trying the fallback model.", error);
     setPersonStatus("working", "RMBG 不可用，正在使用备用模型...");
@@ -643,7 +632,6 @@ async function recutPerson() {
       state.personBounds = result.bounds;
       state.cutoutMode = "MediaPipe";
       setPersonStatus("ready", "已使用备用人物模型");
-      completed = true;
     } catch (fallbackError) {
       console.warn("Fallback segmentation unavailable, using local edge fallback.", fallbackError);
       const result = segmentWithLocalEdge(state.personImage);
@@ -651,50 +639,14 @@ async function recutPerson() {
       state.personBounds = result.bounds;
       state.cutoutMode = "本地边缘";
       setPersonStatus("ready", "已使用本地边缘抠图");
-      completed = true;
     }
   } finally {
     segmentationBusy = false;
-    button.disabled = false;
-    if (completed && state.personCutout) {
-      state.personOriginalCutout = cloneCanvas(state.personCutout);
-      state.personMatteMask = createWhiteMask(state.personCutout.width, state.personCutout.height);
-      state.personAdjustedCutout = cloneCanvas(state.personCutout);
-      flashCanvasUpdate();
-      showToast("人物调节已更新");
-      scheduleHistoryCommit(120);
-    }
     state.personFiltered = null;
     state.personFilterDirty = true;
     schedulePersonFilter(0);
     queueRender();
   }
-}
-
-function createWhiteMask(width, height) {
-  const mask = document.createElement("canvas");
-  mask.width = width;
-  mask.height = height;
-  const context = mask.getContext("2d");
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, width, height);
-  return mask;
-}
-
-function cloneCanvas(sourceCanvas) {
-  const clone = document.createElement("canvas");
-  clone.width = sourceCanvas.width;
-  clone.height = sourceCanvas.height;
-  clone.getContext("2d").drawImage(sourceCanvas, 0, 0);
-  return clone;
-}
-
-function flashCanvasUpdate() {
-  const shell = $("#canvasShell");
-  shell.classList.remove("canvas-updated");
-  void shell.offsetWidth;
-  shell.classList.add("canvas-updated");
-  setTimeout(() => shell.classList.remove("canvas-updated"), 700);
 }
 
 function setPersonStatus(type, text) {
@@ -993,9 +945,9 @@ function composeCutout(source, alphaMask, width, height) {
   cutout.height = height;
   const cutoutContext = cutout.getContext("2d");
   cutoutContext.drawImage(source, 0, 0);
-  const cleanMask = cleanMaskCanvas(alphaMask);
   cutoutContext.globalCompositeOperation = "destination-in";
-  cutoutContext.drawImage(cleanMask, 0, 0, width, height);
+  cutoutContext.filter = "blur(1px)";
+  cutoutContext.drawImage(alphaMask, 0, 0, width, height);
   cutoutContext.filter = "none";
   cutoutContext.globalCompositeOperation = "source-over";
 
@@ -1003,25 +955,6 @@ function composeCutout(source, alphaMask, width, height) {
     canvas: cutout,
     bounds: findAlphaBounds(cutout)
   };
-}
-
-function cleanMaskCanvas(maskCanvas) {
-  const width = maskCanvas.width;
-  const height = maskCanvas.height;
-  const context = maskCanvas.getContext("2d", { willReadFrequently: true });
-  const pixels = context.getImageData(0, 0, width, height);
-  const alpha = new Uint8Array(width * height);
-  for (let index = 0; index < alpha.length; index += 1) {
-    const value = pixels.data[index * 4 + 3] / 255;
-    alpha[index] = Math.max(0, Math.min(255, Math.round(smoothstep(0.08, 0.58, value) * 255)));
-    pixels.data[index * 4 + 3] = alpha[index];
-  }
-
-  const cleaned = document.createElement("canvas");
-  cleaned.width = width;
-  cleaned.height = height;
-  cleaned.getContext("2d").putImageData(pixels, 0, 0);
-  return cleaned;
 }
 
 function findAlphaBounds(sourceCanvas) {
@@ -1120,8 +1053,9 @@ function applyPersonFilterPreset(presetName) {
   }
 
   const preset = {
-    personHighlight: 0,
-    personShadow: 0,
+    faceSlim: 0,
+    lipstickAmount: 0,
+    lipstickColor: "#b2384e",
     ...(PERSON_FILTER_PRESETS[presetName] || PERSON_FILTER_PRESETS.clean)
   };
   $("#personFilterPreset").value = presetName;
@@ -1186,11 +1120,7 @@ function applyBackgroundFilterPreset(presetName) {
     return;
   }
 
-  const preset = {
-    backgroundHighlight: 0,
-    backgroundShadow: 0,
-    ...(BACKGROUND_FILTER_PRESETS[presetName] || BACKGROUND_FILTER_PRESETS.clean)
-  };
+  const preset = BACKGROUND_FILTER_PRESETS[presetName] || BACKGROUND_FILTER_PRESETS.clean;
   $("#backgroundFilterPreset").value = presetName;
   Object.entries(preset).forEach(([id, value]) => {
     document.getElementById(id).value = String(value);
@@ -1240,37 +1170,8 @@ function bindPhotoGestures() {
   };
 
   canvas.addEventListener("pointerdown", (event) => {
-    const point = rectForEvent(event);
-    if (state.matteTool !== "none" && state.personCutout && state.personDrawTransform) {
-      const transform = state.personDrawTransform;
-      const insidePerson = point.x >= transform.left && point.x <= transform.left + transform.width &&
-        point.y >= transform.top && point.y <= transform.top + transform.height;
-      if (insidePerson) {
-        canvas.setPointerCapture(event.pointerId);
-        state.matteStroke = {
-          pointerId: event.pointerId,
-          tool: state.matteTool,
-          transform,
-          bounds: transform.bounds,
-          radius: Number($("#matteBrushSize").value) / 2 * transform.bounds.width / transform.width,
-          last: mapPointToPersonSource(point, transform, transform.bounds)
-        };
-        applyMattePoint(state.matteStroke, state.matteStroke.last);
-        return;
-      }
-    }
-    const textHit = findTitleHit(point);
-    if (textHit && state.matteTool === "none") {
-      state.pendingTextClick = {
-        pointerId: event.pointerId,
-        clientX: event.clientX,
-        clientY: event.clientY,
-        hit: textHit
-      };
-      canvas.setPointerCapture(event.pointerId);
-      return;
-    }
     if (!state.sceneImage) return;
+    const point = rectForEvent(event);
     const media = getMediaRect(RATIOS[state.activeRatio]);
     const inside = point.x >= media.x && point.x <= media.x + media.width && point.y >= media.y && point.y <= media.y + media.height;
     if (!inside) return;
@@ -1286,11 +1187,6 @@ function bindPhotoGestures() {
   });
 
   canvas.addEventListener("pointermove", (event) => {
-    if (state.matteStroke && state.matteStroke.pointerId === event.pointerId) {
-      const point = rectForEvent(event);
-      continueMatteStroke(state.matteStroke, point);
-      return;
-    }
     if (!state.sceneDrag || state.sceneDrag.pointerId !== event.pointerId) return;
     const rect = canvas.getBoundingClientRect();
     const deltaX = (event.clientX - state.sceneDrag.clientX) / rect.width * 200;
@@ -1303,23 +1199,6 @@ function bindPhotoGestures() {
   });
 
   const endDrag = (event) => {
-    if (state.matteStroke && state.matteStroke.pointerId === event.pointerId) {
-      state.matteStroke = null;
-      state.personBounds = findAlphaBounds(state.personAdjustedCutout || state.personCutout);
-      state.personFiltered = null;
-      state.personFilterDirty = true;
-      schedulePersonFilter(60);
-      queueRender();
-      scheduleHistoryCommit(100);
-      return;
-    }
-    if (state.pendingTextClick && state.pendingTextClick.pointerId === event.pointerId) {
-      const moved = Math.hypot(event.clientX - state.pendingTextClick.clientX, event.clientY - state.pendingTextClick.clientY);
-      const hit = state.pendingTextClick.hit;
-      state.pendingTextClick = null;
-      if (moved < 8) openCanvasTextEditor(hit);
-      return;
-    }
     if (!state.sceneDrag || state.sceneDrag.pointerId !== event.pointerId) return;
     state.sceneDrag = null;
     canvas.style.cursor = "grab";
@@ -1341,125 +1220,6 @@ function bindPhotoGestures() {
     queueRender();
     saveSettings();
   }, { passive: false });
-}
-
-function mapPointToPersonSource(point, transform, bounds) {
-  return {
-    x: bounds.x + (point.x - transform.left) / transform.width * bounds.width,
-    y: bounds.y + (point.y - transform.top) / transform.height * bounds.height
-  };
-}
-
-function continueMatteStroke(stroke, point) {
-  const sourcePoint = mapPointToPersonSource(point, stroke.transform, stroke.bounds);
-  const distance = Math.hypot(sourcePoint.x - stroke.last.x, sourcePoint.y - stroke.last.y);
-  const steps = Math.max(1, Math.ceil(distance / Math.max(2, stroke.radius * 0.38)));
-  for (let index = 1; index <= steps; index += 1) {
-    const x = stroke.last.x + (sourcePoint.x - stroke.last.x) * index / steps;
-    const y = stroke.last.y + (sourcePoint.y - stroke.last.y) * index / steps;
-    applyMattePoint(stroke, { x, y });
-  }
-  stroke.last = sourcePoint;
-  state.personFiltered = null;
-  queueRender();
-}
-
-function applyMattePoint(stroke, point) {
-  const maskContext = state.personMatteMask.getContext("2d");
-  const adjustedContext = state.personAdjustedCutout.getContext("2d");
-  const radius = Math.max(2, stroke.radius);
-  if (stroke.tool === "brush") {
-    maskContext.save();
-    maskContext.fillStyle = "#ffffff";
-    maskContext.beginPath();
-    maskContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
-    maskContext.fill();
-    maskContext.restore();
-
-    adjustedContext.save();
-    adjustedContext.beginPath();
-    adjustedContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
-    adjustedContext.clip();
-    adjustedContext.drawImage(state.personOriginalCutout, 0, 0);
-    adjustedContext.restore();
-  } else {
-    maskContext.save();
-    maskContext.globalCompositeOperation = "destination-out";
-    maskContext.beginPath();
-    maskContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
-    maskContext.fill();
-    maskContext.restore();
-
-    adjustedContext.save();
-    adjustedContext.globalCompositeOperation = "destination-out";
-    adjustedContext.beginPath();
-    adjustedContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
-    adjustedContext.fill();
-    adjustedContext.restore();
-  }
-}
-
-function findTitleHit(point) {
-  return state.titleHitAreas.find((area) => (
-    point.x >= area.x - 8 &&
-    point.x <= area.x + area.width + 8 &&
-    point.y >= area.y - 8 &&
-    point.y <= area.y + area.height + 8
-  ));
-}
-
-function bindCanvasTextEditor() {
-  const editor = $("#canvasTextEditor");
-  editor.addEventListener("input", () => {
-    const inputId = editor.dataset.inputId;
-    const input = document.getElementById(inputId);
-    if (!input) return;
-    input.value = editor.value;
-    syncOutput(inputId);
-    queueRender();
-    saveSettings();
-  });
-  editor.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      editor.value = state.textEditorOriginal;
-      const input = document.getElementById(editor.dataset.inputId);
-      if (input) input.value = state.textEditorOriginal;
-      editor.blur();
-    } else if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      editor.blur();
-    }
-  });
-  editor.addEventListener("blur", () => {
-    editor.hidden = true;
-    queueRender();
-    scheduleHistoryCommit(80);
-  });
-}
-
-function openCanvasTextEditor(hit) {
-  const editor = $("#canvasTextEditor");
-  const input = document.getElementById(hit.inputId);
-  const canvasRect = canvas.getBoundingClientRect();
-  const shellRect = $("#canvasShell").getBoundingClientRect();
-  const scaleX = canvasRect.width / canvas.width;
-  const scaleY = canvasRect.height / canvas.height;
-  editor.dataset.inputId = hit.inputId;
-  editor.value = input.value;
-  state.textEditorOriginal = input.value;
-  editor.hidden = false;
-  editor.style.left = `${canvasRect.left - shellRect.left + hit.x * scaleX - 4}px`;
-  editor.style.top = `${canvasRect.top - shellRect.top + hit.y * scaleY - 5}px`;
-  editor.style.width = `${Math.max(140, hit.width * scaleX + 12)}px`;
-  editor.style.height = `${Math.max(48, hit.height * scaleY + 10)}px`;
-  editor.style.fontFamily = `"${$("#fontFamily").value}", serif`;
-  editor.style.fontWeight = $("#fontWeight").value;
-  editor.style.fontSize = `${Math.max(16, hit.height * scaleY * 0.72)}px`;
-  editor.style.color = hit.inputId === "line2Input"
-    ? (TEMPLATE_STYLES[state.template]?.markerTextColor || $("#textColor").value)
-    : $("#textColor").value;
-  editor.focus();
-  editor.select();
 }
 
 function clamp(value, min, max) {
@@ -1499,44 +1259,6 @@ function bindHistoryControls() {
   $("#redoButton").addEventListener("click", redoHistory);
 }
 
-function bindMatteTools() {
-  $$("#matteTools button").forEach((button) => {
-    button.addEventListener("click", () => setMatteTool(button.dataset.matteTool));
-  });
-  $("#resetMatteButton").addEventListener("click", resetMatte);
-  document.addEventListener("keydown", (event) => {
-    const tag = document.activeElement?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (event.key.toLowerCase() === "b") setMatteTool("brush");
-    if (event.key.toLowerCase() === "e") setMatteTool("erase");
-    if (event.key.toLowerCase() === "v") setMatteTool("none");
-  });
-}
-
-function setMatteTool(tool) {
-  state.matteTool = tool;
-  $$("#matteTools button").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.matteTool === tool);
-  });
-  canvas.style.cursor = tool === "none" ? "grab" : "crosshair";
-}
-
-function resetMatte() {
-  if (!state.personOriginalCutout) {
-    showToast("请先上传并抠出人物");
-    return;
-  }
-  state.personAdjustedCutout = cloneCanvas(state.personOriginalCutout);
-  state.personMatteMask = createWhiteMask(state.personAdjustedCutout.width, state.personAdjustedCutout.height);
-  state.personBounds = findAlphaBounds(state.personAdjustedCutout);
-  state.personFiltered = null;
-  state.personFilterDirty = true;
-  schedulePersonFilter(0);
-  queueRender();
-  scheduleHistoryCommit(80);
-  showToast("已恢复原始人物抠图");
-}
-
 function scheduleHistoryCommit(delay = 120) {
   if (restoringHistory) return;
   clearTimeout(historyTimer);
@@ -1563,9 +1285,6 @@ function createHistorySnapshot() {
     sceneImage: state.sceneImage,
     personImage: state.personImage,
     personCutout: state.personCutout,
-    personOriginalCutout: state.personOriginalCutout,
-    personAdjustedCutout: state.personAdjustedCutout,
-    personMatteMask: state.personMatteMask,
     personFiltered: state.personFiltered,
     personBounds: state.personBounds,
     cutoutMode: state.cutoutMode
@@ -1582,9 +1301,6 @@ function snapshotSignature(snapshot) {
     sceneImage: getAssetId(snapshot.sceneImage),
     personImage: getAssetId(snapshot.personImage),
     personCutout: getAssetId(snapshot.personCutout),
-    personOriginalCutout: getAssetId(snapshot.personOriginalCutout),
-    personAdjustedCutout: getAssetId(snapshot.personAdjustedCutout),
-    personMatteMask: getAssetId(snapshot.personMatteMask),
     personFiltered: getAssetId(snapshot.personFiltered)
   });
 }
@@ -1612,9 +1328,6 @@ function restoreHistorySnapshot(snapshot) {
   state.sceneImage = snapshot.sceneImage;
   state.personImage = snapshot.personImage;
   state.personCutout = snapshot.personCutout;
-  state.personOriginalCutout = snapshot.personOriginalCutout;
-  state.personAdjustedCutout = snapshot.personAdjustedCutout;
-  state.personMatteMask = snapshot.personMatteMask;
   state.personFiltered = snapshot.personFiltered;
   state.personBounds = snapshot.personBounds;
   state.cutoutMode = snapshot.cutoutMode;
@@ -1758,10 +1471,19 @@ function drawTemplateMetadata(ctx, width, height) {
   const family = templateStyle.family || "classic";
   if (family === "classic") return;
 
+  const isDark = family === "midnight";
   const accent = templateStyle.markerColor;
+  const ink = isDark ? "#ece2cf" : "#262522";
   const margin = width * 0.055;
 
   ctx.save();
+  ctx.fillStyle = ink;
+  ctx.globalAlpha = isDark ? 0.82 : 0.62;
+  ctx.font = `600 ${Math.max(13, width * 0.012)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(family === "swiss" ? "COVER / 01" : "ISSUE 01 · COVER", margin, height * 0.042);
+
   ctx.fillStyle = accent;
   ctx.globalAlpha = 0.92;
   if (family === "swiss") {
@@ -1770,6 +1492,10 @@ function drawTemplateMetadata(ctx, width, height) {
   } else {
     ctx.fillRect(margin, height * 0.078, Math.max(3, width * 0.003), height * 0.105);
     ctx.fillRect(margin, height * 0.915, width * 0.89, Math.max(1, width * 0.0014));
+    ctx.globalAlpha = isDark ? 0.62 : 0.48;
+    ctx.fillStyle = ink;
+    ctx.font = `500 ${Math.max(11, width * 0.009)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    ctx.fillText("COVER STORY · VISUAL NOTE", margin, height * 0.932);
   }
   ctx.restore();
 }
@@ -1817,28 +1543,7 @@ function drawMedia(ctx, ratio) {
 
   ctx.filter = "none";
   drawTemperature(ctx, x, y, width, height);
-  drawHighlightShadow(ctx, x, y, width, height);
   drawVignette(ctx, x, y, width, height);
-  ctx.restore();
-}
-
-function drawHighlightShadow(ctx, x, y, width, height) {
-  const highlight = Number($("#backgroundHighlight").value);
-  const shadow = Number($("#backgroundShadow").value);
-
-  ctx.save();
-  if (highlight !== 0) {
-    ctx.globalCompositeOperation = highlight > 0 ? "soft-light" : "multiply";
-    ctx.globalAlpha = Math.abs(highlight) / 50 * 0.22;
-    ctx.fillStyle = highlight > 0 ? "#ffffff" : "#242424";
-    ctx.fillRect(x, y, width, height);
-  }
-  if (shadow !== 0) {
-    ctx.globalCompositeOperation = shadow > 0 ? "screen" : "multiply";
-    ctx.globalAlpha = Math.abs(shadow) / 50 * 0.12;
-    ctx.fillStyle = shadow > 0 ? "#ffffff" : "#111111";
-    ctx.fillRect(x, y, width, height);
-  }
   ctx.restore();
 }
 
@@ -1945,24 +1650,6 @@ function drawTitle(ctx, ratio) {
   titleY = Math.max(height * 0.035, Math.min(titleY, mediaTop - totalHeight - mediaGap));
   const firstX = centered ? width / 2 : width * (1 - layout.titleWidth) / 2;
   const secondX = centered ? width / 2 : firstX;
-  const firstWidth = measureTextWidth(ctx, line1, fontFamily, fontWeight, firstSize);
-  const secondWidth = line2 ? measureTextWidth(ctx, line2, fontFamily, fontWeight, secondSize) : 0;
-  state.titleHitAreas = [{
-    inputId: "line1Input",
-    x: centered ? firstX - firstWidth / 2 : firstX,
-    y: titleY,
-    width: firstWidth,
-    height: firstSize * 1.08
-  }];
-  if (line2) {
-    state.titleHitAreas.push({
-      inputId: "line2Input",
-      x: centered ? secondX - secondWidth / 2 : secondX,
-      y: titleY + firstSize + gap,
-      width: secondWidth,
-      height: secondSize * 1.08
-    });
-  }
 
   if (line2) {
     drawMarker(
@@ -2342,9 +2029,8 @@ function hexToRgb(hex) {
 function schedulePersonFilter(delay = 110) {
   clearTimeout(state.personFilterTimer);
   state.personFilterTimer = setTimeout(() => {
-    const adjustedSource = state.personAdjustedCutout || state.personCutout;
-    if (!adjustedSource) return;
-    state.personFiltered = applyGPUPixelPersonFilter(adjustedSource);
+    if (!state.personCutout) return;
+    state.personFiltered = applyGPUPixelPersonFilter(state.personCutout);
     state.personFilterDirty = false;
     queueRender();
   }, delay);
@@ -2354,15 +2040,16 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
   const settings = {
     smooth: Number($("#skinSmooth").value),
     white: Number($("#skinWhite").value),
-    highlight: Number($("#personHighlight").value),
-    shadow: Number($("#personShadow").value),
     brightness: Number($("#personBrightness").value),
     contrast: Number($("#personContrast").value),
     saturation: Number($("#personSaturation").value),
     temperature: Number($("#personTemperature").value),
-    sharpen: Number($("#personSharpen").value)
+    sharpen: Number($("#personSharpen").value),
+    faceSlim: Number($("#faceSlim").value),
+    lipstickAmount: Number($("#lipstickAmount").value),
+    lipstickColor: $("#lipstickColor").value
   };
-  const unchanged = ["smooth", "white", "highlight", "shadow", "brightness", "contrast", "saturation", "temperature", "sharpen"]
+  const unchanged = ["smooth", "white", "brightness", "contrast", "saturation", "temperature", "sharpen", "faceSlim", "lipstickAmount"]
     .every((key) => settings[key] === 0);
   if (unchanged) return sourceCanvas;
 
@@ -2411,14 +2098,6 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
     green += lift + settings.temperature * 0.08;
     blue += lift - settings.temperature * 0.34;
 
-    const currentLuminance = red * 0.3 + green * 0.59 + blue * 0.11;
-    const highlightMask = smoothstep(145, 255, currentLuminance);
-    const shadowMask = 1 - smoothstep(20, 115, currentLuminance);
-    const toneLift = settings.highlight * 1.15 * highlightMask + settings.shadow * 1.15 * shadowMask;
-    red += toneLift;
-    green += toneLift;
-    blue += toneLift;
-
     red = (red - 128) * contrastFactor + 128;
     green = (green - 128) * contrastFactor + 128;
     blue = (blue - 128) * contrastFactor + 128;
@@ -2456,7 +2135,103 @@ function applyGPUPixelPersonFilter(sourceCanvas) {
     adjustedContext.putImageData(sharpened, 0, 0);
   }
 
-  return adjustedCanvas;
+  return applyFaceReshapeAndLipstick(adjustedCanvas, settings);
+}
+
+function applyFaceReshapeAndLipstick(sourceCanvas, settings) {
+  if (settings.faceSlim === 0 && settings.lipstickAmount === 0) return sourceCanvas;
+  const width = sourceCanvas.width;
+  const height = sourceCanvas.height;
+  const faceBox = estimateFaceRegion(sourceCanvas);
+  let resultCanvas = sourceCanvas;
+
+  if (settings.faceSlim !== 0) {
+    const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+    const sourcePixels = sourceContext.getImageData(0, 0, width, height);
+    const outputPixels = new ImageData(new Uint8ClampedArray(sourcePixels.data), width, height);
+    const scale = settings.faceSlim >= 0
+      ? 1 - settings.faceSlim / 50 * 0.2
+      : 1 + Math.abs(settings.faceSlim) / 50 * 0.16;
+    const centerX = faceBox.x + faceBox.width / 2;
+
+    for (let y = Math.floor(faceBox.y); y < Math.ceil(faceBox.y + faceBox.height); y += 1) {
+      for (let x = Math.floor(faceBox.x); x < Math.ceil(faceBox.x + faceBox.width); x += 1) {
+        const sourceX = Math.round(centerX + (x - centerX) / scale);
+        if (sourceX < 0 || sourceX >= width) continue;
+        const targetIndex = (y * width + x) * 4;
+        const sourceIndex = (y * width + sourceX) * 4;
+        outputPixels.data[targetIndex] = sourcePixels.data[sourceIndex];
+        outputPixels.data[targetIndex + 1] = sourcePixels.data[sourceIndex + 1];
+        outputPixels.data[targetIndex + 2] = sourcePixels.data[sourceIndex + 2];
+        outputPixels.data[targetIndex + 3] = sourcePixels.data[sourceIndex + 3];
+      }
+    }
+
+    resultCanvas = document.createElement("canvas");
+    resultCanvas.width = width;
+    resultCanvas.height = height;
+    resultCanvas.getContext("2d").putImageData(outputPixels, 0, 0);
+  }
+
+  if (settings.lipstickAmount <= 0) return resultCanvas;
+
+  const resultContext = resultCanvas.getContext("2d");
+  const [red, green, blue] = hexToRgb(settings.lipstickColor);
+  const mouthX = faceBox.x + faceBox.width / 2;
+  const mouthY = faceBox.y + faceBox.height * 0.68;
+  const radiusX = Math.max(4, faceBox.width * 0.22);
+  const radiusY = Math.max(2, faceBox.height * 0.07);
+  resultContext.save();
+  resultContext.globalCompositeOperation = "source-atop";
+  resultContext.globalAlpha = settings.lipstickAmount / 100 * 0.72;
+  resultContext.filter = "blur(1.5px)";
+  resultContext.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+  resultContext.beginPath();
+  resultContext.ellipse(mouthX, mouthY, radiusX, radiusY, 0, 0, Math.PI * 2);
+  resultContext.fill();
+  resultContext.restore();
+  return resultCanvas;
+}
+
+function estimateFaceRegion(canvas) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const pixels = context.getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  let count = 0;
+
+  for (let y = 0; y < height * 0.68; y += 2) {
+    for (let x = width * 0.25; x < width * 0.75; x += 2) {
+      const index = (y * width + x) * 4;
+      if (pixels[index + 3] < 20) continue;
+      if (skinLikelihood(pixels[index], pixels[index + 1], pixels[index + 2]) < 0.38) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      count += 1;
+    }
+  }
+
+  if (count < 30 || maxX <= minX || maxY <= minY) {
+    return {
+      x: width * 0.32,
+      y: height * 0.08,
+      width: width * 0.36,
+      height: height * 0.42
+    };
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
 }
 
 function skinLikelihood(red, green, blue) {
@@ -2489,17 +2264,10 @@ function drawPerson(ctx, ratio) {
   const outlineWidth = Number($("#outlineWidth").value) * Math.min(1.25, Math.max(0.85, width / 1080));
   const outlineColor = $("#outlineColor").value;
   const outlineStyle = $("#outlineStyle").value;
-  const source = state.personAdjustedCutout || state.personCutout;
+  const source = state.personCutout;
   const filteredSource = state.personFiltered || source;
   const drawX = -targetWidth / 2;
   const drawY = -targetHeight;
-  state.personDrawTransform = {
-    left: x + drawX,
-    top: y + drawY,
-    width: targetWidth,
-    height: targetHeight,
-    bounds
-  };
 
   ctx.save();
   ctx.translate(x, y);
@@ -2561,27 +2329,24 @@ function syncOutput(id) {
     brushY: `${input.value} px`,
     mediaHeight: `${input.value}%`,
     mediaY: `${input.value}%`,
-    brightness: `${cappedPercent(input.value)}%`,
-    backgroundContrast: `${cappedPercent(input.value)}%`,
-    saturation: `${cappedPercent(input.value)}%`,
-    backgroundHighlight: formatSigned(input.value),
-    backgroundShadow: formatSigned(input.value),
+    brightness: `${input.value}%`,
+    backgroundContrast: `${input.value}%`,
+    saturation: `${input.value}%`,
     backgroundTemperature: formatSigned(input.value),
-    backgroundBlur: `${cappedPercent(input.value)}%`,
-    vignette: `${cappedPercent(input.value)}%`,
+    backgroundBlur: `${input.value}%`,
+    vignette: `${input.value}%`,
     sceneScale: `${input.value}%`,
     sceneX: formatSigned(input.value),
     sceneY: formatSigned(input.value),
     skinSmooth: `${input.value}%`,
     skinWhite: `${input.value}%`,
-    personHighlight: formatSigned(input.value),
-    personShadow: formatSigned(input.value),
     personBrightness: formatSigned(input.value),
     personContrast: formatSigned(input.value),
     personSaturation: formatSigned(input.value),
     personTemperature: formatSigned(input.value),
     personSharpen: `${input.value}%`,
-    matteBrushSize: `${input.value} px`
+    faceSlim: formatSigned(input.value),
+    lipstickAmount: `${input.value}%`
   };
 
   const outputIds = {
@@ -2600,8 +2365,6 @@ function syncOutput(id) {
     brightness: "brightnessValue",
     backgroundContrast: "backgroundContrastValue",
     saturation: "saturationValue",
-    backgroundHighlight: "backgroundHighlightValue",
-    backgroundShadow: "backgroundShadowValue",
     backgroundTemperature: "backgroundTemperatureValue",
     backgroundBlur: "backgroundBlurValue",
     vignette: "vignetteValue",
@@ -2610,14 +2373,13 @@ function syncOutput(id) {
     sceneY: "sceneYValue",
     skinSmooth: "skinSmoothValue",
     skinWhite: "skinWhiteValue",
-    personHighlight: "personHighlightValue",
-    personShadow: "personShadowValue",
     personBrightness: "personBrightnessValue",
     personContrast: "personContrastValue",
     personSaturation: "personSaturationValue",
     personTemperature: "personTemperatureValue",
     personSharpen: "personSharpenValue",
-    matteBrushSize: "matteBrushSizeValue"
+    faceSlim: "faceSlimValue",
+    lipstickAmount: "lipstickAmountValue"
   };
 
   if (outputIds[id]) document.getElementById(outputIds[id]).textContent = valueMap[id];
@@ -2626,7 +2388,8 @@ function syncOutput(id) {
     backgroundColor: "backgroundHex",
     outlineColor: "outlineHex",
     textColor: "textHex",
-    markerColor: "markerHex"
+    markerColor: "markerHex",
+    lipstickColor: "lipstickHex"
   };
   if (hexOutputs[id]) document.getElementById(hexOutputs[id]).textContent = input.value.toUpperCase();
 
@@ -2639,10 +2402,6 @@ function syncOutput(id) {
 function formatSigned(value) {
   const number = Number(value);
   return number > 0 ? `+${number}` : String(number);
-}
-
-function cappedPercent(value) {
-  return Math.min(100, Number(value));
 }
 
 function syncAllOutputs() {
@@ -2695,12 +2454,8 @@ function resetSettings() {
   state.sceneImage = null;
   state.personImage = null;
   state.personCutout = null;
-  state.personOriginalCutout = null;
-  state.personAdjustedCutout = null;
-  state.personMatteMask = null;
   state.personFiltered = null;
   state.personBounds = null;
-  setMatteTool("none");
   $("#sceneFileName").textContent = "点击或拖入图片";
   $("#personFileName").textContent = "自动识别并抠出人物";
   setPersonStatus("idle", "上传人物后自动抠图");
